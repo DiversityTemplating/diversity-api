@@ -1,2 +1,4 @@
 ebin/
 _rel/
+.idea
+*.iml
