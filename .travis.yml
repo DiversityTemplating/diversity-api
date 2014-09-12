@@ -8,5 +8,5 @@ otp_release:
    - R16B01
 script:
    - cd divapi 
-   - ls deps/cowboy
+   - make
    - make tests
