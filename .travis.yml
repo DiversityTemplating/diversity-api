@@ -1,6 +1,6 @@
 language: erlang
 script: 
-   - "gmake tests"
+   - "make tests"
 otp_release:
    - 17.1
    - 17.0
