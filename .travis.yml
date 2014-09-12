@@ -7,4 +7,5 @@ otp_release:
    - R16B02
    - R16B01
 script:
-   - cd divapi && make tests
+   - cd divapi 
+   - make tests
