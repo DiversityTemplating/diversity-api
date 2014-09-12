@@ -1,4 +1,6 @@
 language: erlang
+install: 
+   - "make deps"
 script: 
    - "make tests"
 otp_release:
