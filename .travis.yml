@@ -1,8 +1,6 @@
 language: erlang
-install: 
-   - "make deps"
 script: 
-   - "make tests"
+   - "gmake tests"
 otp_release:
    - 17.1
    - 17.0
