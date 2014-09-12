@@ -1,4 +1,5 @@
 language: erlang
+script: "cd divapi && make clean && rm -rf ./.git && make tests"
 otp_release:
    - 17.1
    - 17.0
@@ -6,9 +7,3 @@ otp_release:
    - R16B03
    - R16B02
    - R16B01
-install: 
-   - make deps
-script:
-   - cd divapi 
-   - make
-   - make tests
