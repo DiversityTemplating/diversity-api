@@ -5,8 +5,7 @@
 -export([handle/2]).
 -export([terminate/3]).
 
--record(state, {
-}).
+-record(state, {}).
 
 init(_, Req, _Opts) ->
 	{ok, Req, #state{}}.

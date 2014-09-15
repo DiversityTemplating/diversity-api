@@ -7,8 +7,12 @@
 -define(PORT, 8181).
 
 start(_Type, _Args) ->
+    inets:start(),
+    Routes = [{"/", diversity_api_handler, []},
+              {"/components/", component_list_handler, []},
+              {"/components/:component/[...]", component_handler, []}],
     Dispatch = cowboy_router:compile([
-        {'_', [{"/", diversity_api_handler, []}]}
+        {'_', Routes}
     ]),
     cowboy:start_http(diversity_api_listener, 100, [{port, ?PORT}],
         [{env, [{dispatch, Dispatch}]}]
