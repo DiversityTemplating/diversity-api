@@ -6,6 +6,8 @@
 	{applications, [
 		kernel,
 		stdlib,
+        inets,
+        jiffy,
 		cowboy
 	]},
 	{mod, {divapi_app, []}},
