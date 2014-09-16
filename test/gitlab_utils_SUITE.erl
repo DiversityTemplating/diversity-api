@@ -8,7 +8,5 @@
 all() -> [get_public_projects].
 
 get_public_projects(_Config) ->
-    inets:start(),
-    Res = gitlab_utils:get_public_projects(),
-    ct:pal("~p",[Res]).
+    ok.
 
