@@ -51,7 +51,10 @@ find_latest_tag(Tags) ->
             nomatch -> false; _ -> true
         end
     end, Tags),
-    lists:last(lists:sort(NumericTags)).
+    case NumericTags of
+        [] -> <<"HEAD">>;
+        _ -> lists:last(lists:sort(NumericTags))
+    end.
 
 find_latest_patch(PrefixTag, Tags) ->
     lists:foldl(fun(Tag, LatestPatch) ->
