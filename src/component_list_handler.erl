@@ -8,6 +8,8 @@
 -record(state, {
 }).
 
+-define(INFORMATION_FIELDS, [<<"name">>,<<"title">>,<<"description">>,<<"version">>,<<"grouping">>]).
+
 init(_, Req, _Opts) ->
 	{ok, Req, #state{}}.
 
@@ -18,7 +20,8 @@ handle(Req, State=#state{}) ->
             {QueryVal, Req3} = cowboy_req:qs_val(<<"grouping">>, Req2),
             Projects = case QueryVal of
                 undefined ->
-                    maps:keys(gitlab_utils:get_public_projects());
+                    PublicProjects = gitlab_utils:get_public_projects(),
+                    get_component_information(PublicProjects);
                 Group when is_binary(Group) ->
                     PublicProjects = gitlab_utils:get_public_projects(),
                     filter_projects_by_grouping(PublicProjects, Group)
@@ -31,6 +34,15 @@ handle(Req, State=#state{}) ->
             cowboy_req:reply(404, Req2)
     end,
 	{ok, Req4, State}.
+
+get_component_information(Projects) ->
+
+    maps:fold(fun(ProjectName, ProjectUrl, Acc) ->
+        Json = git_utils:get_diversity_json(ProjectName, ProjectUrl, <<"HEAD">>),
+        DiversityMap = jiffy:decode(Json, [return_maps]),
+        Without = lists:filter(fun(K) -> not lists:member(K, ?INFORMATION_FIELDS) end, maps:keys(DiversityMap)),
+        [maps:without(Without, DiversityMap) | Acc]
+        end, [], Projects).
 
 filter_projects_by_grouping(Projects, Grouping) ->
     maps:fold(fun(ProjectName, ProjectUrl, Acc) ->
