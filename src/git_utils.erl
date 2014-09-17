@@ -1,7 +1,7 @@
 -module(git_utils).
 
 %% API
--export([clone_bare/1, tags/1, get_diversity_json/2, get_diversity_json/3, git_cmd/1]).
+-export([clone_bare/1, tags/1, get_diversity_json/2, get_diversity_json/3, git_cmd/1, git_refresh_repo/1]).
 
 %% @doc Clones a git repository with the bare flag
 -spec clone_bare(string()) -> any().
@@ -37,8 +37,8 @@ get_git_result(RepoName, RepoUrl, Cmd) ->
             RepoUrl2 = get_repo_url(RepoName, RepoUrl),
             clone_bare(binary_to_list(RepoUrl2));
         true ->
-            %% Checkout not needed, just refresh repo
-            ok %%git_refresh_repo(RepoName)
+            %% Checkout not needed
+            ok
     end,
     file:set_cwd(GitRepoName),
     git_cmd(Cmd).
@@ -46,9 +46,12 @@ get_git_result(RepoName, RepoUrl, Cmd) ->
 get_repo_url(RepoName, undefined) -> gitlab_utils:get_public_project_url(RepoName);
 get_repo_url(_, RepoUrl) -> RepoUrl.
 
-%%git_refresh_repo(RepoName) ->
-%%    Cmd = "fetch origin master:master",
-%%    get_git_result(RepoName, Cmd).
+git_refresh_repo(RepoName) ->
+    {ok, RepoDir} = application:get_env(divapi, repo_dir),
+    GitRepoName =  RepoDir ++ "/" ++ binary_to_list(RepoName) ++ ".git",
+    file:set_cwd(GitRepoName),
+    Cmd = "fetch origin master:master",
+    git_cmd(Cmd).
 
 git_cmd(Cmd) ->
     os:cmd("git " ++ Cmd).
