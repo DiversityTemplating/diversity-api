@@ -21,7 +21,7 @@ handle(Req, State=#state{}) ->
             Projects = case QueryVal of
                 undefined ->
                     PublicProjects = gitlab_utils:get_public_projects(),
-                    get_component_information(PublicProjects);
+                    get_components_information(PublicProjects);
                 Group when is_binary(Group) ->
                     PublicProjects = gitlab_utils:get_public_projects(),
                     filter_projects_by_grouping(PublicProjects, Group)
@@ -35,25 +35,28 @@ handle(Req, State=#state{}) ->
     end,
 	{ok, Req4, State}.
 
-get_component_information(Projects) ->
-
-    maps:fold(fun(ProjectName, ProjectUrl, Acc) ->
-        Json = git_utils:get_diversity_json(ProjectName, ProjectUrl, <<"HEAD">>),
+%% @doc Returns a list with new maps only containing the keys in information_fields
+-spec get_components_information([map()]) -> [map()].
+get_components_information(Components) ->
+    maps:fold(fun(ComponentName, ComponentUrl, Acc) ->
+        Json = git_utils:get_diversity_json(ComponentName, ComponentUrl, <<"HEAD">>),
         DiversityMap = jiffy:decode(Json, [return_maps]),
         Without = lists:filter(fun(K) -> not lists:member(K, ?INFORMATION_FIELDS) end, maps:keys(DiversityMap)),
         [maps:without(Without, DiversityMap) | Acc]
-        end, [], Projects).
+        end, [], Components).
 
-filter_projects_by_grouping(Projects, Grouping) ->
-    maps:fold(fun(ProjectName, ProjectUrl, Acc) ->
-        Json = git_utils:get_diversity_json(ProjectName, ProjectUrl, <<"HEAD">>),
+%% @doc Returns a list of component names filtered by given grouping
+-spec filter_projects_by_grouping([map()], binary()) -> [binary()].
+filter_projects_by_grouping(Components, Grouping) ->
+    maps:fold(fun(ComponentName, ComponentUrl, Acc) ->
+        Json = git_utils:get_diversity_json(ComponentName, ComponentUrl, <<"HEAD">>),
         DiversityMap = jiffy:decode(Json, [return_maps]),
         Groups = maps:get(<<"grouping">>, DiversityMap, []),
         case lists:member(Grouping, Groups) of
-            true -> [ProjectName | Acc];
+            true -> [ComponentName | Acc];
             false -> Acc
         end
-    end, [], Projects).
+    end, [], Components).
 
 terminate(_Reason, _Req, _State) ->
 	ok.
