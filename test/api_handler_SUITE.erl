@@ -16,5 +16,5 @@ basic_handle(_Config) ->
     meck:expect(cowboy_req, reply, fun(200, Headers, Body, Req) -> {ok, Req} end),
 
     Response = diversity_api_handler:handle(SimplifiedReq, State),
-    Response =:= {ok, SimplifiedReq, State},
+    Response == {ok, SimplifiedReq, State},
     meck:unload(cowboy_req).
