@@ -17,6 +17,7 @@ start(_Type, _Args) ->
     cowboy:start_http(diversity_api_listener, 100, [{port, ?PORT}],
         [{env, [{dispatch, Dispatch}]}]
     ),
+    divapi_cache:start_link(),
 	divapi_sup:start_link().
 
 stop(_State) ->

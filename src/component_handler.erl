@@ -25,31 +25,37 @@ handle(Req, State=#state{}) ->
 handle_get(Req, _State=#state{}) ->
     {PathInfo, Req2} = cowboy_req:path_info(Req),
     {ComponentName, Req3} = cowboy_req:binding(component, Req2),
-    Tags = git_utils:tags(ComponentName),
+    Tags = divapi_cache:get_tags(ComponentName),
     {ok, Req4} =
         case PathInfo of
             [] ->
                 cowboy_req:reply(200, ?JSON_HEADER, jiffy:encode(Tags), Req3);
             [<<"*">>] ->
                 Tag = find_latest_tag(Tags),
-                Data = git_utils:get_diversity_json(ComponentName, Tag),
+                Data = divapi_cache:get_diversity_json(ComponentName, Tag),
                 cowboy_req:reply(200, ?JSON_HEADER, Data, Req3);
             [Tag] ->
                 Data = case lists:member(Tag, Tags) of
                            true ->
-                               git_utils:get_diversity_json(ComponentName, Tag);
+                               divapi_cache:get_diversity_json(ComponentName, Tag);
                            false ->
                                PatchNr = find_latest_patch(Tag, Tags),
                                TagWithPatch = <<Tag/binary, ".", PatchNr/binary>>,
                                %% Ensure that it's an valid tag
-                               true = lists:member(TagWithPatch, Tags),
-                               git_utils:get_diversity_json(ComponentName, TagWithPatch)
+                               case lists:member(TagWithPatch, Tags) of
+                                   true -> divapi_cache:get_diversity_json(ComponentName, TagWithPatch);
+                                   _ -> undefined
+                               end
                        end,
-                cowboy_req:reply(200, ?JSON_HEADER, Data, Req3);
+                case Data of
+                    undefined -> cowboy_req:reply(404, Req3);
+                    _ -> cowboy_req:reply(200, ?JSON_HEADER, Data, Req3)
+                end;
+
             [Tag, Settings]
                 when Settings =:= <<"settings">>;
                      Settings =:= <<"settingsForm">> ->
-                Json = git_utils:get_diversity_json(ComponentName, Tag),
+                Json = divapi_cache:get_diversity_json(ComponentName, Tag),
                 {DiversityData} = jiffy:decode(Json),
                 SettingsBinary = proplists:get_value(Settings, DiversityData, {[]}),
                 SettingsJson = jiffy:encode(SettingsBinary),
@@ -65,6 +71,8 @@ handle_post(Req, _State=#state{}) ->
     case PathInfo of
         [<<"update">>] ->
             git_utils:git_refresh_repo(ComponentName),
+            divapi_cache:empty_cache(ComponentName),
+
             cowboy_req:reply(200, ?JSON_HEADER, <<"Updated">>, Req3);
         _ ->
             cowboy_req:reply(404, Req3)

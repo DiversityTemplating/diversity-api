@@ -1,26 +1,24 @@
 -module(git_utils).
 
 %% API
--export([tags/1, get_diversity_json/2, get_diversity_json/3, git_refresh_repo/1]).
-
-
+-export([tags/2, get_diversity_json/3, git_refresh_repo/1]).
 
 %% @doc Returns a list with all tags in a git repository
--spec tags(binary()) -> [binary()].
-tags(RepoName) ->
+-spec tags(binary(), binary()) -> [binary()].
+tags(RepoName, RepoUrl) ->
     Cmd = "tag",
-    ResultString = get_git_result(RepoName, Cmd),
+    ResultString = get_git_result(RepoName, RepoUrl, Cmd),
     [list_to_binary(Tag) || Tag <- string:tokens(ResultString, "\n")].
 
 %% @doc Returns the diversity.json for a tag in a repo
--spec get_diversity_json(binary(), binary()) -> binary().
-get_diversity_json(RepoName, Tag) ->
-    Cmd = "show " ++ binary_to_list(Tag) ++ ":diversity.json",
-    list_to_binary(get_git_result(RepoName, Cmd)).
 -spec get_diversity_json(binary(), binary(), binary()) -> binary().
 get_diversity_json(RepoName, RepoUrl, Tag) ->
     Cmd = "show " ++ binary_to_list(Tag) ++ ":diversity.json",
-    list_to_binary(get_git_result(RepoName, RepoUrl, Cmd)).
+    case get_git_result(RepoName, RepoUrl, Cmd) of
+        "fatal" ++ _ -> undefined;
+        Result -> list_to_binary(Result)
+    end.
+
 
 %% @doc Fetches the latest tags for a repo
 -spec git_refresh_repo(binary()) -> any().
@@ -34,8 +32,6 @@ git_refresh_repo(RepoName) ->
 %% ----------------------------------------------------------------------------
 %% Internal stuff
 %% ----------------------------------------------------------------------------
-get_git_result(RepoName, Cmd) ->
-    get_git_result(RepoName, undefined, Cmd).
 get_git_result(RepoName, RepoUrl, Cmd) ->
     {ok, RepoDir} = application:get_env(divapi, repo_dir),
     GitRepoName =  RepoDir ++ "/" ++ binary_to_list(RepoName) ++ ".git",
