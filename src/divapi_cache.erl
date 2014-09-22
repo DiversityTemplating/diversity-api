@@ -9,6 +9,8 @@
 
 -record(component, {name, tag, json}).
 
+-define(TIMEOUT, 800000).
+
 %% API.
 
 -spec start_link() -> {ok, pid()}.
@@ -19,7 +21,7 @@ populate_cache() ->
     gen_server:call(?MODULE, populate).
 
 get_components() ->
-    gen_server:call(?MODULE, get_components).
+    gen_server:call(?MODULE, get_components, ?TIMEOUT).
 
 get_tags(Component) ->
     gen_server:call(?MODULE, {get_tags, Component}).
