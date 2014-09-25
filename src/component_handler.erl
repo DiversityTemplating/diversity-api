@@ -8,7 +8,7 @@
 -record(state, {
 }).
 
--define(JSON_HEADER, [{<<"content-type">>, <<"application/json">>}]).
+-define(JSON_HEADER, [{<<"content-type">>, <<"application/json">>}, {<<"Access-Control-Allow-Origin">>, <<"*">>}]).
 
 init(_, Req, _Opts) ->
 	{ok, Req, #state{}}.
