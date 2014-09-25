@@ -34,6 +34,8 @@ Running
 Usage/Routes
 ------------
 
+GET
+
 `/components/<component>/` - Lists all tagged versions of the component
 `/components/` - Lists information of all public components on diversity.io
 `/components/?grouping=sidebar` - Lists all components that have sidebar configured in their grouping attribute.
@@ -48,4 +50,6 @@ Usage/Routes
 
 Note: All the version selection methods can be used to get settings, settingsForm and files from the selected version.
 
+POST
 
+`/components/<component>/update` - The api fetches the latest tags from diversity.io
