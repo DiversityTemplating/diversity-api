@@ -4,7 +4,6 @@
 -export([start/2]).
 -export([stop/1]).
 
--define(PORT, 8181).
 
 start(_Type, _Args) ->
     inets:start(),
@@ -14,7 +13,8 @@ start(_Type, _Args) ->
     Dispatch = cowboy_router:compile([
         {'_', Routes}
     ]),
-    cowboy:start_http(diversity_api_listener, 100, [{port, ?PORT}],
+    {ok, Port} = application:get_env(divapi, port),
+    cowboy:start_http(diversity_api_listener, 100, [{port, Port}],
         [{env, [{dispatch, Dispatch}]}]
     ),
     divapi_cache:start_link(),

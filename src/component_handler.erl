@@ -61,7 +61,7 @@ handle_get(Req, _State=#state{}) ->
         end,
     {ok, Req4}.
 
-expand_tag(<<"*">>, Tags) -> find_latest_tag(Tags);
+expand_tag(<<"*/">>, Tags) -> find_latest_tag(Tags);
 expand_tag(Tag, Tags) ->
     case lists:member(Tag, Tags) of
         true ->
