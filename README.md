@@ -3,6 +3,12 @@ diversity-api
 
 An erlang diversity api server
 
+Requirements
+------------
+
+Diversity-api requires Erlang/OTP R17 which can be downloaded here:
+https://www.erlang-solutions.com/downloads/download-erlang-otp
+
 Configuration
 -------------
 
@@ -19,10 +25,13 @@ what port to use for the api server. This is currently done in the `rel/sys.conf
 
 The token can be obtained in your Account settings page on diversity.io (`Profile settings -> Account`)
 
+To configure or change configuration after building the release, the sys.config used by the release are located in
+`_rel/divapi_release/releases/1/sys.config`.
+
 Building
 --------
 
-`make` - Compiles and builds a release in _rel/divapi_release/
+`make` - Fetches dependencies, compiles and builds a release in _rel/divapi_release/
 
 Running
 -------
@@ -46,7 +55,7 @@ GET
 
 `/components/<component>/1.2.3/settings` - settings attribute from the diversity.json from component with version 1.2.3
 `/components/<component>/1.2.3/settingsForm` - settingsForm attribute from the diversity.json from component with version 1.2.3
-`/components/<component>/1.2.3/files/path/to/file.js` - Gets the file file.js
+`/components/<component>/1.2.3/files/path/to/file.js` - file.js from component with version 1.2.3
 
 Note: All the version selection methods can be used to get settings, settingsForm and files from the selected version.
 
