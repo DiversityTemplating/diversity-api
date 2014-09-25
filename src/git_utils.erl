@@ -55,7 +55,7 @@ get_git_result(RepoName, RepoUrl, Cmd) ->
 
 clone_bare(RepoUrl) ->
     {ok, RepoDir} = application:get_env(divapi, repo_dir),
-    filelib:ensure_dir(RepoDir),
+    filelib:ensure_dir(RepoDir ++ "/"),
     file:set_cwd(RepoDir),
     Cmd = "clone --bare " ++ RepoUrl,
     git_cmd(Cmd).
