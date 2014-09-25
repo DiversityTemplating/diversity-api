@@ -27,7 +27,7 @@ handle(Req, State=#state{}) ->
                     filter_projects_by_grouping(PublicProjects, Group)
             end,
             cowboy_req:reply(200,
-                [{<<"content-type">>, <<"application/json">>}],
+                [{<<"content-type">>, <<"application/json">>}, {<<"Access-Control-Allow-Origin">>, <<"*">>}],
                 jiffy:encode(Projects),
                 Req3);
         _ ->
