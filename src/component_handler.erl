@@ -91,7 +91,7 @@ find_latest_tag([]) ->
     <<"">>;
 find_latest_tag(Tags) ->
     NumericTags = lists:filter(fun(X) ->
-        case re:run(X, "^\\d+(\\.\\d){0,2}$") of
+        case re:run(X, "^\\d+(\\.\\d+){0,2}$") of
             nomatch -> false; _ -> true
         end
     end, Tags),
@@ -99,11 +99,14 @@ find_latest_tag(Tags) ->
         [] -> <<"HEAD">>;
         _ ->
             SortFun = fun(Tag1, Tag2) ->
-                Tag1Parts = binary:split(Tag1, <<".">>),
-                Tag2Parts = binary:split(Tag2, <<".">>),
-                lists:all(fun({Tag1Part, Tag2Part}) -> Tag1Part =< Tag2Part end, lists:zip(Tag1Parts, Tag2Parts))
+                Tag1Parts = binary:split(Tag1, <<".">>, [global]),
+                Tag2Parts = binary:split(Tag2, <<".">>, [global]),
+                lists:all(fun({Tag1Part, Tag2Part}) ->
+                    binary_to_integer(Tag1Part) =< binary_to_integer(Tag2Part) end,
+                    lists:zip(Tag1Parts, Tag2Parts))
                 end,
-            lists:last(lists:sort(SortFun, NumericTags))
+            Sorted = lists:sort(SortFun, NumericTags),
+            lists:last(Sorted)
     end.
 
 find_latest_patch(PrefixTag, Tags) ->
