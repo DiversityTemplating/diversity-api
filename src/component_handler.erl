@@ -53,7 +53,8 @@ handle_get(Req, _State=#state{}) ->
                             error ->
                                 cowboy_req:reply(500, Req3);
                             _ ->
-                                Headers = [{<<"content-type">>, <<"text/javascript">>}],
+                                {Mime, Type, []} = cow_mimetypes:all(File),
+                                Headers = [{<<"content-type">>, << Mime/binary, "/", Type/binary >>}],
                                 cowboy_req:reply(200, Headers, FileBin, Req3)
                         end;
                     _ ->
