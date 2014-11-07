@@ -13,9 +13,8 @@ tags(RepoName, RepoUrl) ->
         <<>>  ->
             [];
         ResultBin ->
-            ResultString = binary_to_list(ResultBin),
-            %% Here we need to do it differently!!
-            [list_to_binary(Tag) || Tag <- string:tokens(ResultString, "\n")]
+            Res = re:split(ResultBin, <<"\n">>),
+            lists:droplast(Res)
     end.
 
 %% @doc Returns the diversity.json for a tag in a repo
