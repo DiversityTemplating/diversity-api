@@ -7,7 +7,8 @@
 
 -record(state, {}).
 
--define(JSON_HEADER, [{<<"content-type">>, <<"application/json">>}, {<<"Access-Control-Allow-Origin">>, <<"*">>}]).
+-define(JSON_HEADER, [{<<"content-type">>, <<"application/json">>}]).
+-define(ACCESS_CONTROL_HEADER, [{<<"Access-Control-Allow-Origin">>, <<"*">>}]).
 
 init(_, Req, _Opts) ->
 	{ok, Req, #state{}}.
@@ -34,8 +35,11 @@ handle_get(Req, _State=#state{}) ->
                 case Routes of
                     [] ->
                         case divapi_cache:get_diversity_json(ComponentName, Tag) of
-                            undefined -> cowboy_req:reply(404, Req3);
-                            Data      -> cowboy_req:reply(200, ?JSON_HEADER, Data, Req3)
+                            undefined ->
+                                cowboy_req:reply(404, Req3);
+                            Data      ->
+                                cowboy_req:reply(200, ?JSON_HEADER ++ ?ACCESS_CONTROL_HEADER,
+	                                             Data, Req3)
                         end;
                     [Settings] when Settings =:= <<"settings">>;
                                     Settings =:= <<"settingsForm">> ->
@@ -43,20 +47,37 @@ handle_get(Req, _State=#state{}) ->
                         {DiversityData} = jiffy:decode(Json),
                         SettingsBinary = proplists:get_value(Settings, DiversityData, {[]}),
                         SettingsJson = jiffy:encode(SettingsBinary),
-                        cowboy_req:reply(200, ?JSON_HEADER, SettingsJson, Req3);
+                        cowboy_req:reply(200, ?JSON_HEADER ++ ?ACCESS_CONTROL_HEADER,
+                                         SettingsJson, Req3);
                     [<<"files">> | Path] ->
                         File = filename:join(Path),
-                        FileBin = git_utils:get_file(ComponentName, undefined, Tag, File),
-                        case FileBin of
-                            undefined ->
-                                cowboy_req:reply(404, Req3);
-                            error ->
-                                cowboy_req:reply(500, Req3);
-                            _ ->
-                                {Mime, Type, []} = cow_mimetypes:all(File),
-                                Headers = [{<<"content-type">>, << Mime/binary, "/", Type/binary >>}],
-                                cowboy_req:reply(200, Headers, FileBin, Req3)
-                        end;
+                        case cowboy_req:header(<<"if-none-match">>, Req3) of
+                            {File, Req} ->
+                                cowboy_req:reply(304, Req3);
+                            _    ->
+                                FileBin = git_utils:get_file(ComponentName, undefined, Tag, File),
+                                case FileBin of
+                                    undefined ->
+                                        cowboy_req:reply(404, Req3);
+                                    error ->
+                                        cowboy_req:reply(500, Req3);
+                                    _ ->
+                                        {Mime, Type, []} = cow_mimetypes:all(File),
+                                        Headers = [{<<"content-type">>,
+                                                    << Mime/binary, "/", Type/binary >>}],
+                                        Headers1 = case Tag of
+                                            <<"HEAD">> ->
+                                                Headers;
+                                            _ ->
+                                                Headers ++
+                                                [{<<"Cache-Control">>,
+                                                  <<"max-age=90000">>},
+                                                 {<<"Etag">>, File}]
+                                        end,
+                                        cowboy_req:reply(200, Headers1 ++ ?ACCESS_CONTROL_HEADER,
+                                                         FileBin, Req3)
+                                end
+                            end;
                     _ ->
                         cowboy_req:reply(404, Req3)
                 end;
