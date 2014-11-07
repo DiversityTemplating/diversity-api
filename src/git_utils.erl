@@ -6,9 +6,16 @@
 %% @doc Returns a list with all tags in a git repository
 -spec tags(binary(), binary()) -> [binary()].
 tags(RepoName, RepoUrl) ->
-    Cmd = "tag",
-    ResultString = get_git_result(RepoName, RepoUrl, Cmd),
-    [list_to_binary(Tag) || Tag <- string:tokens(ResultString, "\n")].
+    Cmd = <<"git tag">>,
+    case get_git_result(RepoName, RepoUrl, Cmd) of
+        error ->
+            [];
+        <<>>  ->
+            [];
+        ResultBin ->
+            Res = re:split(ResultBin, <<"\n">>),
+            lists:droplast(Res)
+    end.
 
 %% @doc Returns the diversity.json for a tag in a repo
 -spec get_diversity_json(binary(), binary(), binary()) -> binary().
@@ -20,29 +27,32 @@ get_diversity_json(RepoName, RepoUrl, Tag) ->
 git_refresh_repo(RepoName) ->
     {ok, RepoDir} = application:get_env(divapi, repo_dir),
     GitRepoName =  RepoDir ++ "/" ++ binary_to_list(RepoName) ++ ".git",
-    file:set_cwd(GitRepoName),
-    Cmd = "fetch origin master:master",
-    git_cmd(Cmd).
+    Cmd = <<"git fetch origin master:master">>,
+    git_cmd(Cmd, GitRepoName).
 
 get_file(RepoName, RepoUrl, Tag, FilePath) ->
     get_git_file(RepoName, RepoUrl, Tag, FilePath).
 
-
 %% ----------------------------------------------------------------------------
 %% Internal stuff
 %% ----------------------------------------------------------------------------
+
+%% @doc Retrieves the file from the bare git repo and the specific tag.
+-spec get_git_file(RepoName :: binary(), RepoUrl :: binary(), Tag :: binary(),
+                   FilePath :: binary) -> binary() | undefined.
 get_git_file(RepoName, RepoUrl, Tag, FilePath) ->
-    Cmd = "show " ++ binary_to_list(Tag) ++ ":" ++ binary_to_list(FilePath),
+    Cmd = <<"git --no-pager show ", Tag/binary, ":", FilePath/binary>>,
     case get_git_result(RepoName, RepoUrl, Cmd) of
-        "fatal" ++ _ -> undefined;
-        Result -> list_to_binary(Result)
+        FileBin when is_binary(FileBin) -> FileBin;
+        error                           -> undefined;
+        ok                              -> <<>> %% Command succesful but empty result!
     end.
 
 get_git_result(RepoName, RepoUrl, Cmd) ->
     {ok, RepoDir} = application:get_env(divapi, repo_dir),
-    GitRepoName =  RepoDir ++ "/" ++ binary_to_list(RepoName) ++ ".git",
+    GitRepoDir =  RepoDir ++ "/" ++ binary_to_list(RepoName) ++ ".git",
     %% Clone git repo if non-existing in configured dir
-    case filelib:is_dir(GitRepoName) of
+    case filelib:is_dir(GitRepoDir) of
         false ->
             RepoUrl2 = get_repo_url(RepoName, RepoUrl),
             clone_bare(binary_to_list(RepoUrl2));
@@ -50,18 +60,29 @@ get_git_result(RepoName, RepoUrl, Cmd) ->
             %% Checkout not needed
             ok
     end,
-    file:set_cwd(GitRepoName),
-    git_cmd(Cmd).
+    git_cmd(Cmd, GitRepoDir).
 
 clone_bare(RepoUrl) ->
     {ok, RepoDir} = application:get_env(divapi, repo_dir),
-    filelib:ensure_dir(RepoDir ++ "/"),
-    file:set_cwd(RepoDir),
-    Cmd = "clone --bare " ++ RepoUrl,
-    git_cmd(Cmd).
+    %% Ensure it exists if not try to create it.
+    ok = filelib:ensure_dir(RepoDir ++ "/"),
+    Cmd = <<"git clone --bare ", (list_to_binary(RepoUrl))/binary>>,
+    git_cmd(Cmd, RepoDir).
 
 get_repo_url(RepoName, undefined) -> gitlab_utils:get_public_project_url(RepoName);
 get_repo_url(_, RepoUrl) -> RepoUrl.
 
-git_cmd(Cmd) ->
-    os:cmd("git " ++ Cmd).
+git_cmd(Cmd, WorkingDir) ->
+    Port = erlang:open_port({spawn, Cmd}, [exit_status, {cd, WorkingDir}, binary, use_stdio]),
+    wait_for_file(Port, <<>>).
+
+wait_for_file(Port, File) ->
+    receive
+        {Port, {data, Chunk}} ->
+            wait_for_file(Port, <<File/binary, Chunk/binary>>);
+        {_ , {exit_status, 0}} ->
+            File;
+        {_, {exit_status, _}} ->
+            %% Either not a git repo or operation failed. No need to close port it' already done.
+            error
+    end.

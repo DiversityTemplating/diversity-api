@@ -5,8 +5,7 @@
 -export([handle/2]).
 -export([terminate/3]).
 
--record(state, {
-}).
+-record(state, {}).
 
 -define(JSON_HEADER, [{<<"content-type">>, <<"application/json">>}, {<<"Access-Control-Allow-Origin">>, <<"*">>}]).
 
@@ -34,10 +33,9 @@ handle_get(Req, _State=#state{}) ->
                 Tag = expand_tag(PartialTag, Tags),
                 case Routes of
                     [] ->
-                        Data = divapi_cache:get_diversity_json(ComponentName, Tag),
-                        case Data of
+                        case divapi_cache:get_diversity_json(ComponentName, Tag) of
                             undefined -> cowboy_req:reply(404, Req3);
-                            _ -> cowboy_req:reply(200, ?JSON_HEADER, Data, Req3)
+                            Data      -> cowboy_req:reply(200, ?JSON_HEADER, Data, Req3)
                         end;
                     [Settings] when Settings =:= <<"settings">>;
                                     Settings =:= <<"settingsForm">> ->
@@ -48,13 +46,19 @@ handle_get(Req, _State=#state{}) ->
                         cowboy_req:reply(200, ?JSON_HEADER, SettingsJson, Req3);
                     [<<"files">> | Path] ->
                         File = filename:join(Path),
-                        FileData = git_utils:get_file(ComponentName, undefined, Tag, File),
-                        {Mime, Type, []} = cow_mimetypes:all(File),
-                        Header = [{<<"content-type">>, << Mime/binary, "/", Type/binary >>}],
-                        cowboy_req:reply(200, Header, FileData, Req3);
+                        FileBin = git_utils:get_file(ComponentName, undefined, Tag, File),
+                        case FileBin of
+                            undefined ->
+                                cowboy_req:reply(404, Req3);
+                            error ->
+                                cowboy_req:reply(500, Req3);
+                            _ ->
+                                {Mime, Type, []} = cow_mimetypes:all(File),
+                                Headers = [{<<"content-type">>, << Mime/binary, "/", Type/binary >>}],
+                                cowboy_req:reply(200, Headers, FileBin, Req3)
+                        end;
                     _ ->
                         cowboy_req:reply(404, Req3)
-
                 end;
             _ ->
                 cowboy_req:reply(404, Req3)
@@ -70,7 +74,6 @@ expand_tag(Tag, Tags) ->
             PatchNr = find_latest_patch(Tag, Tags),
             <<Tag/binary, ".", PatchNr/binary>>
     end.
-
 
 handle_post(Req, _State=#state{}) ->
     {ComponentName, Req2} = cowboy_req:binding(component, Req),
