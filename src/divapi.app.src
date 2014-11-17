@@ -8,6 +8,7 @@
 		stdlib,
         inets,
         jiffy,
+		ssl,
 		cowboy
 	]},
 	{mod, {divapi_app, []}},
