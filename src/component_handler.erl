@@ -11,7 +11,7 @@
 -define(ACCESS_CONTROL_HEADER, [{<<"Access-Control-Allow-Origin">>, <<"*">>}]).
 
 init(_, Req, _Opts) ->
-	{ok, Req, #state{}}.
+    {ok, Req, #state{}}.
 
 handle(Req, State=#state{}) ->
     {Method, Req2} = cowboy_req:method(Req),
@@ -29,17 +29,18 @@ handle_get(Req, _State=#state{}) ->
     {ok, Req4} =
         case PathInfo of
             [] ->
-                cowboy_req:reply(200, ?JSON_HEADER, jiffy:encode(Tags), Req3);
+                cowboy_req:reply(200, ?JSON_HEADER ++ ?ACCESS_CONTROL_HEADER,
+                                 jiffy:encode(Tags), Req3);
             [PartialTag | Routes] ->
                 Tag = expand_tag(PartialTag, Tags),
                 case Routes of
                     [] ->
                         case divapi_cache:get_diversity_json(ComponentName, Tag) of
                             undefined ->
-                                cowboy_req:reply(404, Req3);
+                                cowboy_req:reply(404, ?ACCESS_CONTROL_HEADER, Req3);
                             Data      ->
                                 cowboy_req:reply(200, ?JSON_HEADER ++ ?ACCESS_CONTROL_HEADER,
-	                                             Data, Req3)
+                                                 Data, Req3)
                         end;
                     [Settings] when Settings =:= <<"settings">>;
                                     Settings =:= <<"settingsForm">> ->
@@ -53,14 +54,14 @@ handle_get(Req, _State=#state{}) ->
                         File = filename:join(Path),
                         case cowboy_req:header(<<"if-none-match">>, Req3) of
                             {File, Req} ->
-                                cowboy_req:reply(304, Req3);
+                                cowboy_req:reply(304, ?ACCESS_CONTROL_HEADER, Req3);
                             _    ->
                                 FileBin = git_utils:get_file(ComponentName, undefined, Tag, File),
                                 case FileBin of
                                     undefined ->
-                                        cowboy_req:reply(404, Req3);
+                                        cowboy_req:reply(404, ?ACCESS_CONTROL_HEADER, Req3);
                                     error ->
-                                        cowboy_req:reply(500, Req3);
+                                        cowboy_req:reply(500, ?ACCESS_CONTROL_HEADER, Req3);
                                     _ ->
                                         {Mime, Type, []} = cow_mimetypes:all(File),
                                         Headers = [{<<"content-type">>,
@@ -125,4 +126,4 @@ find_latest_patch(PrefixTag, Tags) ->
     end, <<"0">>, Tags).
 
 terminate(_Reason, _Req, _State) ->
-	ok.
+    ok.
