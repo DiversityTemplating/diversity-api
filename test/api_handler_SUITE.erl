@@ -13,8 +13,8 @@ basic_handle(_Config) ->
     SimplifiedReq = {http_req,<<"GET">>,'HTTP/1.1'},
     State = #state{},
     meck:new(cowboy_req),
-    meck:expect(cowboy_req, reply, fun(200, Headers, Body, Req) -> {ok, Req} end),
+    meck:expect(cowboy_req, reply, fun(200, _Headers, _Body, Req) -> {ok, Req} end),
 
     Response = diversity_api_handler:handle(SimplifiedReq, State),
-    Response == {ok, SimplifiedReq, State},
+    Response = {ok, SimplifiedReq, State},
     meck:unload(cowboy_req).
