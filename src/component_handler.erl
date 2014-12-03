@@ -23,45 +23,61 @@ handle(Req, State=#state{}) ->
     {ok, Req3, State}.
 
 handle_get(Req, _State=#state{}) ->
-    {PathInfo, Req2} = cowboy_req:path_info(Req),
-    {ComponentName, Req3} = cowboy_req:binding(component, Req2),
-    Tags = divapi_cache:get_tags(ComponentName),
-    {ok, Req4} =
+    {ComponentName, Req3} = cowboy_req:binding(component, Req),
+    case componenent_exists(ComponentName) of
+        true ->
+            get_component_data(Req, ComponentName);
+        false ->
+            cowboy_req:reply(404, ?ACCESS_CONTROL_HEADER, Req)
+    end.
+
+componenent_exists(ComponentName) ->
+    {ok, RepoDir} = application:get_env(divapi, repo_dir),
+    filelib:is_dir(RepoDir ++ "/" ++ binary_to_list(ComponentName) ++ ".git").
+
+get_component_data(Req, ComponentName) ->
+    {PathInfo, Req1} = cowboy_req:path_info(Req),
+    Tags = case git_utils:tags(ComponentName, undefined),
+    {ok, Req2} =
         case PathInfo of
             [] ->
                 cowboy_req:reply(200, ?JSON_HEADER ++ ?ACCESS_CONTROL_HEADER,
-                                 jiffy:encode(Tags), Req3);
+                                 jiffy:encode(Tags), Req1);
             [PartialTag | Routes] ->
                 Tag = expand_tag(PartialTag, Tags),
                 case Routes of
                     [] ->
-                        case divapi_cache:get_diversity_json(ComponentName, Tag) of
+                        case git_utils:get_diversity_json(ComponentName, undefined, Tag) of
                             undefined ->
-                                cowboy_req:reply(404, ?ACCESS_CONTROL_HEADER, Req3);
+                                cowboy_req:reply(404, ?ACCESS_CONTROL_HEADER, Req1);
                             Data      ->
                                 cowboy_req:reply(200, ?JSON_HEADER ++ ?ACCESS_CONTROL_HEADER,
-                                                 Data, Req3)
+                                                 Data, Req1)
                         end;
                     [Settings] when Settings =:= <<"settings">>;
                                     Settings =:= <<"settingsForm">> ->
-                        Json = divapi_cache:get_diversity_json(ComponentName, Tag),
-                        {DiversityData} = jiffy:decode(Json),
-                        SettingsBinary = proplists:get_value(Settings, DiversityData, {[]}),
-                        SettingsJson = jiffy:encode(SettingsBinary),
-                        cowboy_req:reply(200, ?JSON_HEADER ++ ?ACCESS_CONTROL_HEADER,
-                                         SettingsJson, Req3);
+                        case git_utils:get_diversity_json(ComponentName, undefined, Tag) of
+                            undefined ->
+                                cowboy_req:reply(404, ?ACCESS_CONTROL_HEADER, Req1);
+                            Json ->
+                                {DiversityData} = jiffy:decode(Json),
+                                SettingsBinary = proplists:get_value(Settings, DiversityData, {[]}),
+                                SettingsJson = jiffy:encode(SettingsBinary),
+                                cowboy_req:reply(200, ?JSON_HEADER ++ ?ACCESS_CONTROL_HEADER,
+                                                 SettingsJson, Req1)
+                        end;
                     [<<"files">> | Path] ->
                         File = filename:join(Path),
-                        case cowboy_req:header(<<"if-none-match">>, Req3) of
+                        case cowboy_req:header(<<"if-none-match">>, Req1) of
                             {File, Req} ->
-                                cowboy_req:reply(304, ?ACCESS_CONTROL_HEADER, Req3);
+                                cowboy_req:reply(304, ?ACCESS_CONTROL_HEADER, Req1);
                             _    ->
                                 FileBin = git_utils:get_file(ComponentName, undefined, Tag, File),
                                 case FileBin of
                                     undefined ->
-                                        cowboy_req:reply(404, ?ACCESS_CONTROL_HEADER, Req3);
+                                        cowboy_req:reply(404, ?ACCESS_CONTROL_HEADER, Req1);
                                     error ->
-                                        cowboy_req:reply(500, ?ACCESS_CONTROL_HEADER, Req3);
+                                        cowboy_req:reply(500, ?ACCESS_CONTROL_HEADER, Req1);
                                     _ ->
                                         {Mime, Type, []} = cow_mimetypes:all(File),
                                         Headers = [{<<"content-type">>,
@@ -76,7 +92,7 @@ handle_get(Req, _State=#state{}) ->
                                                  {<<"Etag">>, File}]
                                         end,
                                         cowboy_req:reply(200, Headers1 ++ ?ACCESS_CONTROL_HEADER,
-                                                         FileBin, Req3)
+                                                         FileBin, Req1)
                                 end
                             end;
                     _ ->
@@ -85,7 +101,7 @@ handle_get(Req, _State=#state{}) ->
             _ ->
                 cowboy_req:reply(404, Req3)
         end,
-    {ok, Req4}.
+    {ok, Req2}.
 
 expand_tag(<<"*">>, _Tags) -> <<"HEAD">>;
 expand_tag(Tag, Tags) ->
@@ -103,9 +119,9 @@ handle_post(Req, _State=#state{}) ->
     case PathInfo of
         [<<"update">>] ->
             git_utils:git_refresh_repo(ComponentName),
-            divapi_cache:empty_cache(ComponentName),
-
             cowboy_req:reply(200, ?JSON_HEADER, <<"Updated">>, Req3);
+        [<<"register">>] ->
+            cowboy_req:reply(200, ?JSON_HEADER, <<"Not implemented yet">>, Req3);
         _ ->
             cowboy_req:reply(404, Req3)
     end,

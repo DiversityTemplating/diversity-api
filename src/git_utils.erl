@@ -53,12 +53,8 @@ get_git_result(RepoName, RepoUrl, Cmd) ->
     GitRepoDir =  RepoDir ++ "/" ++ binary_to_list(RepoName) ++ ".git",
     %% Clone git repo if non-existing in configured dir
     case filelib:is_dir(GitRepoDir) of
-        false ->
-            RepoUrl2 = get_repo_url(RepoName, RepoUrl),
-            clone_bare(binary_to_list(RepoUrl2));
-        true ->
-            %% Checkout not needed
-            ok
+        false -> error; %% Repo does not exist, noop.
+        true -> ok %% Checkout not needed
     end,
     git_cmd(Cmd, GitRepoDir).
 
@@ -68,9 +64,6 @@ clone_bare(RepoUrl) ->
     ok = filelib:ensure_dir(RepoDir ++ "/"),
     Cmd = <<"git clone --bare ", (list_to_binary(RepoUrl))/binary>>,
     git_cmd(Cmd, RepoDir).
-
-get_repo_url(RepoName, undefined) -> gitlab_utils:get_public_project_url(RepoName);
-get_repo_url(_, RepoUrl) -> RepoUrl.
 
 git_cmd(Cmd, WorkingDir) ->
     Port = erlang:open_port({spawn, Cmd}, [exit_status, {cd, WorkingDir}, binary, use_stdio]),
