@@ -1,4 +1,4 @@
--module(component_event).
+-module(component_action).
 -behaviour(cowboy_http_handler).
 
 -export([init/3]).

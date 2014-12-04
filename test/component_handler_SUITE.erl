@@ -19,24 +19,24 @@ handle_component_tags(_Config) ->
     SimplifiedReq = {http_req,<<"GET">>,'HTTP/1.1'},
     State = #state{},
     application:set_env(divapi, repo_dir, "gitdir"),
+    meck:new(filelib, [unstick, passthrough]),
+    meck:expect(filelib, is_dir, fun (_) -> true end),
+
     meck:new(cowboy_req),
-    meck:new(divapi_cache),
-    meck:expect(divapi_cache, get_tags, fun(Component) -> Component = <<"Component">>,
-                                                          [<<"0.1.0">>, <<"0.2.0">>] end),
     meck:expect(cowboy_req, reply, fun(200, _Headers, Body, _Req) -> {ok, Body} end),
     meck:expect(cowboy_req, path_info, fun(Req) -> {[],Req} end),
     meck:expect(cowboy_req, binding, fun(component, Req) -> {<<"Component">>, Req} end),
     meck:expect(cowboy_req, method, fun(Req) -> {<<"GET">>, Req} end),
 
     meck:new(git_utils),
-    meck:expect(git_utils, tags, fun(_, _) -> [<<"0.1.0">>, <<"0.2.0">>] end),
+    meck:expect(git_utils, tags, fun(_) -> [<<"0.1.0">>, <<"0.2.0">>] end),
 
     Expected = jiffy:encode([<<"0.1.0">>, <<"0.2.0">>]),
     Response = component_handler:handle(SimplifiedReq, State),
 
     Response = {ok, Expected, State},
     meck:unload(cowboy_req),
-    meck:unload(divapi_cache),
+    meck:unload(filelib),
     meck:unload(git_utils).
 
 handle_component_tag(_Config) ->
@@ -44,9 +44,6 @@ handle_component_tag(_Config) ->
     State = #state{},
     application:set_env(divapi, repo_dir, "gitdir"),
     meck:new(cowboy_req),
-    meck:new(divapi_cache),
-    meck:expect(divapi_cache, get_tags, fun(Component) -> Component = <<"Component">>,
-                                                          [<<"0.1.1">>, <<"0.2.0">>] end),
     meck:expect(cowboy_req, reply, fun(200, _Headers, Body, _Req) -> {ok, Body} end),
     meck:expect(cowboy_req, path_info, fun(Req) -> {[<<"0.1.1">>],Req} end),
     meck:expect(cowboy_req, binding, fun(component, Req) -> {<<"Component">>, Req} end),
@@ -54,14 +51,12 @@ handle_component_tag(_Config) ->
 
     meck:new(git_utils),
     meck:expect(git_utils, tags, fun(_) -> [<<"0.1.1">>, <<"0.2.0">>] end),
-    meck:expect(git_utils, get_diversity_json, fun(<<"Component">>,_) -> <<"{}">> end),
+    meck:expect(git_utils, get_diversity_json, fun(<<"Component">>, _) -> <<"{}">> end),
 
     Expected = <<"{}">>,
     Response = component_handler:handle(SimplifiedReq, State),
-
     Response = {ok, Expected, State},
     meck:unload(cowboy_req),
-    meck:unload(divapi_cache),
     meck:unload(git_utils).
 
 handle_component_part_tag(_Config) ->
@@ -69,9 +64,6 @@ handle_component_part_tag(_Config) ->
     State = #state{},
     application:set_env(divapi, repo_dir, "gitdir"),
     meck:new(cowboy_req),
-    meck:new(divapi_cache),
-    meck:expect(divapi_cache, get_tags, fun(Component) -> Component = <<"Component">>,
-                                                          [<<"0.1.1">>, <<"0.2.0">>] end),
     meck:expect(cowboy_req, reply, fun(200, _Headers, Body, _Req) -> {ok, Body} end),
     meck:expect(cowboy_req, path_info, fun(Req) -> {[<<"0.1">>],Req} end),
     meck:expect(cowboy_req, binding, fun(component, Req) -> {<<"Component">>, Req} end),
@@ -79,14 +71,13 @@ handle_component_part_tag(_Config) ->
 
     meck:new(git_utils),
     meck:expect(git_utils, tags, fun(_) -> [<<"0.1.1">>, <<"0.2.0">>] end),
-    meck:expect(git_utils, get_diversity_json, fun(<<"Component">>,_) -> <<"{}">> end),
+    meck:expect(git_utils, get_diversity_json, fun(<<"Component">>, _) -> <<"{}">> end),
 
     Expected = <<"{}">>,
     Response = component_handler:handle(SimplifiedReq, State),
 
     Response = {ok, Expected, State},
     meck:unload(cowboy_req),
-    meck:unload(divapi_cache),
     meck:unload(git_utils).
 
 handle_component_wildcard(_Config) ->
@@ -94,9 +85,6 @@ handle_component_wildcard(_Config) ->
     State = #state{},
     application:set_env(divapi, repo_dir, "gitdir"),
     meck:new(cowboy_req),
-    meck:new(divapi_cache),
-    meck:expect(divapi_cache, get_tags, fun(Component) -> Component = <<"Component">>,
-                                                          [<<"0.1.1">>, <<"0.2.0">>] end),
     meck:expect(cowboy_req, reply, fun(200, _Headers, Body, _Req) -> {ok, Body} end),
     meck:expect(cowboy_req, path_info, fun(Req) -> {[<<"*">>],Req} end),
     meck:expect(cowboy_req, binding, fun(component, Req) -> {<<"Component">>, Req} end),
@@ -104,7 +92,7 @@ handle_component_wildcard(_Config) ->
 
     meck:new(git_utils),
     meck:expect(git_utils, tags, fun(_) -> [<<"0.1.1">>, <<"0.2.0">>] end),
-    meck:expect(git_utils, get_diversity_json, fun(<<"Component">>,_) -> <<"{\"test\":\"stuff\"}">> end),
+    meck:expect(git_utils, get_diversity_json, fun(<<"Component">>, _) -> <<"{\"test\":\"stuff\"}">> end),
 
     Expected = <<"{\"test\":\"stuff\"}">>,
     Response = component_handler:handle(SimplifiedReq, State),

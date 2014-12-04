@@ -27,7 +27,8 @@ handle(Req, State=#state{}) ->
                     filter_projects_by_grouping(PublicProjects, Group)
             end,
             cowboy_req:reply(200,
-                [{<<"content-type">>, <<"application/json">>}, {<<"Access-Control-Allow-Origin">>, <<"*">>}],
+                [{<<"content-type">>, <<"application/json">>},
+				 {<<"Access-Control-Allow-Origin">>, <<"*">>}],
                 jiffy:encode(Projects),
                 Req3);
         _ ->
@@ -44,7 +45,7 @@ get_components_information(Components) ->
             case filelib:is_dir(RepoDir ++ "/" ++ Component) of
                 true ->
                     ComponentAdjusted = list_to_binary(string:left(Component, length(Component) - 4)),
-                    case git_utils:get_diversity_json(ComponentAdjusted, undefined, <<"HEAD">>) of
+                    case git_utils:get_diversity_json(ComponentAdjusted, <<"HEAD">>) of
                         undefined ->
                             Acc;
                         ComponentJson ->
@@ -68,7 +69,7 @@ filter_projects_by_grouping(Components, Grouping) ->
         case filelib:is_dir(RepoDir ++ "/" ++ Component) of
             true ->
                 ComponentAdjusted = list_to_binary(string:left(Component, length(Component) - 4)),
-                case git_utils:get_diversity_json(ComponentAdjusted, undefined, <<"HEAD">>) of
+                case git_utils:get_diversity_json(ComponentAdjusted, <<"HEAD">>) of
                     undefined ->
                         Acc;
                     ComponentJson ->

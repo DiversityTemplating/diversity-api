@@ -23,21 +23,21 @@ handle(Req, State=#state{}) ->
     {ok, Req3, State}.
 
 handle_get(Req, _State=#state{}) ->
-    {ComponentName, Req3} = cowboy_req:binding(component, Req),
-    case componenent_exists(ComponentName) of
+    {ComponentName, Req1} = cowboy_req:binding(component, Req),
+    case component_exists(ComponentName) of
         true ->
-            get_component_data(Req, ComponentName);
+            get_component_data(Req1, ComponentName);
         false ->
-            cowboy_req:reply(404, ?ACCESS_CONTROL_HEADER, Req)
+            cowboy_req:reply(404, ?ACCESS_CONTROL_HEADER, Req1)
     end.
 
-componenent_exists(ComponentName) ->
+component_exists(ComponentName) ->
     {ok, RepoDir} = application:get_env(divapi, repo_dir),
     filelib:is_dir(RepoDir ++ "/" ++ binary_to_list(ComponentName) ++ ".git").
 
 get_component_data(Req, ComponentName) ->
     {PathInfo, Req1} = cowboy_req:path_info(Req),
-    Tags = case git_utils:tags(ComponentName, undefined),
+    Tags = git_utils:tags(ComponentName),
     {ok, Req2} =
         case PathInfo of
             [] ->
@@ -47,7 +47,7 @@ get_component_data(Req, ComponentName) ->
                 Tag = expand_tag(PartialTag, Tags),
                 case Routes of
                     [] ->
-                        case git_utils:get_diversity_json(ComponentName, undefined, Tag) of
+                        case git_utils:get_diversity_json(ComponentName, Tag) of
                             undefined ->
                                 cowboy_req:reply(404, ?ACCESS_CONTROL_HEADER, Req1);
                             Data      ->
@@ -56,7 +56,7 @@ get_component_data(Req, ComponentName) ->
                         end;
                     [Settings] when Settings =:= <<"settings">>;
                                     Settings =:= <<"settingsForm">> ->
-                        case git_utils:get_diversity_json(ComponentName, undefined, Tag) of
+                        case git_utils:get_diversity_json(ComponentName, Tag) of
                             undefined ->
                                 cowboy_req:reply(404, ?ACCESS_CONTROL_HEADER, Req1);
                             Json ->
@@ -72,7 +72,7 @@ get_component_data(Req, ComponentName) ->
                             {File, Req} ->
                                 cowboy_req:reply(304, ?ACCESS_CONTROL_HEADER, Req1);
                             _    ->
-                                FileBin = git_utils:get_file(ComponentName, undefined, Tag, File),
+                                FileBin = git_utils:get_file(ComponentName, Tag, File),
                                 case FileBin of
                                     undefined ->
                                         cowboy_req:reply(404, ?ACCESS_CONTROL_HEADER, Req1);
@@ -96,10 +96,10 @@ get_component_data(Req, ComponentName) ->
                                 end
                             end;
                     _ ->
-                        cowboy_req:reply(404, Req3)
+                        cowboy_req:reply(404, Req1)
                 end;
             _ ->
-                cowboy_req:reply(404, Req3)
+                cowboy_req:reply(404, Req1)
         end,
     {ok, Req2}.
 

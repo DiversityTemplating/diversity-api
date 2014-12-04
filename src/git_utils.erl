@@ -1,13 +1,13 @@
 -module(git_utils).
 
 %% API
--export([tags/2, get_diversity_json/3, git_refresh_repo/1, get_file/4]).
+-export([tags/1, get_diversity_json/2, git_refresh_repo/1, get_file/3, clone_bare/1]).
 
 %% @doc Returns a list with all tags in a git repository
--spec tags(binary(), binary()) -> [binary()].
-tags(RepoName, RepoUrl) ->
+-spec tags(binary()) -> [binary()].
+tags(RepoName) ->
     Cmd = <<"git tag">>,
-    case get_git_result(RepoName, RepoUrl, Cmd) of
+    case get_git_result(RepoName, Cmd) of
         error ->
             [];
         <<>>  ->
@@ -18,9 +18,9 @@ tags(RepoName, RepoUrl) ->
     end.
 
 %% @doc Returns the diversity.json for a tag in a repo
--spec get_diversity_json(binary(), binary(), binary()) -> binary().
-get_diversity_json(RepoName, RepoUrl, Tag) ->
-    get_git_file(RepoName, RepoUrl, Tag, <<"diversity.json">>).
+-spec get_diversity_json(binary(), binary()) -> binary().
+get_diversity_json(RepoName, Tag) ->
+    get_git_file(RepoName, Tag, <<"diversity.json">>).
 
 %% @doc Fetches the latest tags for a repo
 -spec git_refresh_repo(binary()) -> any().
@@ -30,25 +30,25 @@ git_refresh_repo(RepoName) ->
     Cmd = <<"git fetch origin master:master">>,
     git_cmd(Cmd, GitRepoName).
 
-get_file(RepoName, RepoUrl, Tag, FilePath) ->
-    get_git_file(RepoName, RepoUrl, Tag, FilePath).
+get_file(RepoName, Tag, FilePath) ->
+    get_git_file(RepoName, Tag, FilePath).
 
 %% ----------------------------------------------------------------------------
 %% Internal stuff
 %% ----------------------------------------------------------------------------
 
 %% @doc Retrieves the file from the bare git repo and the specific tag.
--spec get_git_file(RepoName :: binary(), RepoUrl :: binary(), Tag :: binary(),
+-spec get_git_file(RepoName :: binary(), Tag :: binary(),
                    FilePath :: binary) -> binary() | undefined.
-get_git_file(RepoName, RepoUrl, Tag, FilePath) ->
+get_git_file(RepoName, Tag, FilePath) ->
     Cmd = <<"git --no-pager show ", Tag/binary, ":", FilePath/binary>>,
-    case get_git_result(RepoName, RepoUrl, Cmd) of
+    case get_git_result(RepoName, Cmd) of
         FileBin when is_binary(FileBin) -> FileBin;
         error                           -> undefined;
         ok                              -> <<>> %% Command succesful but empty result!
     end.
 
-get_git_result(RepoName, RepoUrl, Cmd) ->
+get_git_result(RepoName, Cmd) ->
     {ok, RepoDir} = application:get_env(divapi, repo_dir),
     GitRepoDir =  RepoDir ++ "/" ++ binary_to_list(RepoName) ++ ".git",
     %% Clone git repo if non-existing in configured dir
@@ -62,7 +62,7 @@ clone_bare(RepoUrl) ->
     {ok, RepoDir} = application:get_env(divapi, repo_dir),
     %% Ensure it exists if not try to create it.
     ok = filelib:ensure_dir(RepoDir ++ "/"),
-    Cmd = <<"git clone --bare ", (list_to_binary(RepoUrl))/binary>>,
+    Cmd = <<"git clone --bare ", RepoUrl/binary>>,
     git_cmd(Cmd, RepoDir).
 
 git_cmd(Cmd, WorkingDir) ->
