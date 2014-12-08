@@ -9,7 +9,9 @@ start(_Type, _Args) ->
     inets:start(),
     Routes = [{"/", diversity_api_handler, []},
               {"/components/", component_list_handler, []},
-              {"/components/:component/:action/", component_action, []},
+              {"/components/:component/", component_handler, []},
+              {"/components/:component/register", component_action, [register]},
+              {"/components/:component/update", component_action, [update]},
               {"/components/:component/[...]", component_handler, []}],
     Dispatch = cowboy_router:compile([
         {'_', Routes}

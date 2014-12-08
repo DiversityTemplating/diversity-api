@@ -5,38 +5,38 @@
 -export([handle/2]).
 -export([terminate/3]).
 
--record(state, {}).
+-record(state, {action}).
 
 -define(ACCESS_CONTROL_HEADER, [{<<"Access-Control-Allow-Origin">>, <<"*">>}]).
 
-init(_, Req, _Opts) ->
-    {ok, Req, #state{}}.
+init(_, Req, [Opts]) ->
+    {ok, Req, #state{action = Opts}}.
 
-handle(Req, State = #state{}) ->
+handle(Req, State = #state{action = Action}) ->
     {ComponentName, Req1} = cowboy_req:binding(component, Req),
-    {Action, Req2} = cowboy_req:binding(action, Req1),
     case Action of
-        <<"register">> -> register_component(Req2);
-        <<"update">>   -> update_component(Req2, ComponentName)
+        register -> register_component(Req1);
+        update   -> update_component(Req1, ComponentName)
     end,
-    {ok, Req2, State}.
+    {ok, Req1, State}.
 
 register_component(Req) ->
-    RegisterData = case fetch_get_post_data(Req) of
-        {ok, PostData} -> PostData;
+    case fetch_get_post_data(Req) of
+        {ok, RegisterData} ->
+            case proplists:get_value(<<"repo_url">>, RegisterData) of
+                undefined ->
+                    send_reply(Req, error, <<"No repository url supplied">>);
+                RepoUrl ->
+                    case git_utils:clone_bare(RepoUrl) of
+                        error ->
+                            send_reply(Req, error,
+                                       <<"Failed to register your diversity component.">>);
+                        _ ->
+                            send_reply(Req, success,
+                                       <<"Successfully registered your diversity component.">>)
+                    end
+            end;
         {error, Msg}   -> send_reply(Req, error, Msg)
-    end,
-    case proplists:get_value(<<"repo_url">>, RegisterData) of
-        undefined ->
-            send_reply(Req, error, <<"No repository url supplied">>);
-        RepoUrl ->
-            case git_utils:clone_bare(RepoUrl) of
-                error ->
-                    send_reply(Req, error, <<"Failed to register your diversity component.">>);
-                _ ->
-                    send_reply(Req, success,
-                               <<"Successfully registered your diversity component.">>)
-            end
     end.
 
 update_component(Req, ComponentName) ->
@@ -66,8 +66,10 @@ fetch_get_post_data(Req) ->
     %% Check that we have a body otherwise check query string values
     case cowboy_req:has_body(Req) of
         true ->
-            {ok, PostVals, _Req} = cowboy_req:body_qs(Req),
-            {ok, PostVals};
+            case cowboy_req:body_qs(Req) of
+                {ok, [], _Req}       -> {error, "Missing params"};
+                {ok, PostVals, _Req} -> {ok, PostVals}
+            end;
         false ->
             {error, "Missing params"}
     end.

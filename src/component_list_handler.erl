@@ -44,7 +44,8 @@ get_components_information(Components) ->
         fun(Component, Acc) ->
             case filelib:is_dir(RepoDir ++ "/" ++ Component) of
                 true ->
-                    ComponentAdjusted = list_to_binary(string:left(Component, length(Component) - 4)),
+                    ComponentAdjusted =
+                        unicode:characters_to_binary(string:left(Component, length(Component) - 4)),
                     case git_utils:get_diversity_json(ComponentAdjusted, <<"HEAD">>) of
                         undefined ->
                             Acc;
@@ -68,7 +69,8 @@ filter_projects_by_grouping(Components, Grouping) ->
     lists:foldl(fun(Component,  Acc) ->
         case filelib:is_dir(RepoDir ++ "/" ++ Component) of
             true ->
-                ComponentAdjusted = list_to_binary(string:left(Component, length(Component) - 4)),
+                ComponentAdjusted =
+                    unicode:characters_to_binary(string:left(Component, length(Component) - 4)),
                 case git_utils:get_diversity_json(ComponentAdjusted, <<"HEAD">>) of
                     undefined ->
                         Acc;

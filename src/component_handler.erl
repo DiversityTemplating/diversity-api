@@ -40,7 +40,7 @@ get_component_data(Req, ComponentName) ->
     Tags = git_utils:tags(ComponentName),
     {ok, Req2} =
         case PathInfo of
-            [] ->
+            undefined ->
                 cowboy_req:reply(200, ?JSON_HEADER ++ ?ACCESS_CONTROL_HEADER,
                                  jiffy:encode(Tags), Req1);
             [PartialTag | Routes] ->
