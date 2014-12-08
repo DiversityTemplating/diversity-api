@@ -17,8 +17,8 @@ handle(Req, State=#state{}) ->
     {Method, Req2} = cowboy_req:method(Req),
     {ok, Req3} =
         case Method of
-            <<"POST">> -> handle_post(Req2, State);
-            <<"GET">> -> handle_get(Req2, State)
+            <<"GET">> -> handle_get(Req2, State);
+            _          -> cowboy_req:reply(404, ?ACCESS_CONTROL_HEADER, Req2)
         end,
     {ok, Req3, State}.
 
@@ -112,20 +112,6 @@ expand_tag(Tag, Tags) ->
             PatchNr = find_latest_patch(Tag, Tags),
             <<Tag/binary, ".", PatchNr/binary>>
     end.
-
-handle_post(Req, _State=#state{}) ->
-    {ComponentName, Req2} = cowboy_req:binding(component, Req),
-    {PathInfo, Req3} = cowboy_req:path_info(Req2),
-    case PathInfo of
-        [<<"update">>] ->
-            git_utils:git_refresh_repo(ComponentName),
-            cowboy_req:reply(200, ?JSON_HEADER, <<"Updated">>, Req3);
-        [<<"register">>] ->
-            cowboy_req:reply(200, ?JSON_HEADER, <<"Not implemented yet">>, Req3);
-        _ ->
-            cowboy_req:reply(404, Req3)
-    end,
-    {ok, Req3}.
 
 find_latest_patch(PrefixTag, Tags) ->
     lists:foldl(fun(Tag, LatestPatch) ->

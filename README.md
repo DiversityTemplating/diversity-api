@@ -60,16 +60,11 @@ Note: All the version selection methods can be used to get settings, settingsFor
 To register a component
 -----------------------
 
-GET
-`/register/?repo_url=<url to repo>`
-
 POST with parameter repo_url=url_to_repo
-`/register/`
+`/components/<componentname>/register/`
 
 
 Updating a component
 -----------------------
-`/update/?component=<component_name>`
 
-POST with parameter component=<component_name>
-`/component/`
+`/component/<componentname>/update`

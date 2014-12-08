@@ -13,16 +13,19 @@ init(_, Req, _Opts) ->
     {ok, Req, #state{}}.
 
 handle(Req, State = #state{}) ->
-    case cowboy_req:path(Req) of
-        {<<"/register/">>, Req1} ->
-            register_component(Req1);
-        {<<"/update/">>, Req1} ->
-            update_component(Req1)
+    {ComponentName, Req1} = cowboy_req:binding(component, Req),
+    {Action, Req2} = cowboy_req:binding(action, Req1),
+    case Action of
+        <<"register">> -> register_component(Req2);
+        <<"update">>   -> update_component(Req2, ComponentName)
     end,
-    {ok, Req, State}.
+    {ok, Req2, State}.
 
 register_component(Req) ->
-    RegisterData = fetch_get_post_data(Req),
+    RegisterData = case fetch_get_post_data(Req) of
+        {ok, PostData} -> PostData;
+        {error, Msg}   -> send_reply(Req, error, Msg)
+    end,
     case proplists:get_value(<<"repo_url">>, RegisterData) of
         undefined ->
             send_reply(Req, error, <<"No repository url supplied">>);
@@ -36,35 +39,37 @@ register_component(Req) ->
             end
     end.
 
-update_component(Req) ->
-    UpdateData = fetch_get_post_data(Req),
-    case proplists:get_value(<<"component">>, UpdateData) of
-        undefined ->
-            send_reply(Req, error, <<"No component name supplied.">>);
-        ComponentName ->
+update_component(Req, ComponentName) ->
+    case component_exists(ComponentName) of
+        true ->
             case git_utils:refresh_repo(ComponentName) of
                 error ->
                     send_reply(Req, error, <<"Failed to update ", ComponentName/binary>>);
                 _ ->
                     send_reply(Req, success, <<"Component has been updated">>)
-            end
+            end;
+        false ->
+            send_reply(Req, error, <<"Component does not exists.">>)
     end.
+
+component_exists(ComponentName) ->
+    {ok, RepoDir} = application:get_env(divapi, repo_dir),
+    filelib:is_dir(RepoDir ++ "/" ++ binary_to_list(ComponentName) ++ ".git").
 
 send_reply(Req, error, Msg) ->
     cowboy_req:reply(500, ?ACCESS_CONTROL_HEADER, Msg, Req);
 send_reply(Req, success, Msg) ->
     cowboy_req:reply(200, ?ACCESS_CONTROL_HEADER, Msg, Req).
 
--spec fetch_get_post_data(cowboy_req:req()) -> [{binary(), term()}].
+-spec fetch_get_post_data(cowboy_req:req()) -> {ok, [{binary(), term()}]} | {error, binary()}.
 fetch_get_post_data(Req) ->
     %% Check that we have a body otherwise check query string values
     case cowboy_req:has_body(Req) of
         true ->
             {ok, PostVals, _Req} = cowboy_req:body_qs(Req),
-            PostVals;
+            {ok, PostVals};
         false ->
-            {QueryStringVals, _Req} = cowboy_req:qs_vals(Req),
-            QueryStringVals
+            {error, "Missing params"}
     end.
 
 terminate(_Reason, _Req, _State) ->

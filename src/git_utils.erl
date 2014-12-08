@@ -1,7 +1,7 @@
 -module(git_utils).
 
 %% API
--export([tags/1, get_diversity_json/2, git_refresh_repo/1, get_file/3, clone_bare/1]).
+-export([tags/1, get_diversity_json/2, refresh_repo/1, get_file/3, clone_bare/1]).
 
 %% @doc Returns a list with all tags in a git repository
 -spec tags(binary()) -> [binary()].
@@ -23,8 +23,8 @@ get_diversity_json(RepoName, Tag) ->
     get_git_file(RepoName, Tag, <<"diversity.json">>).
 
 %% @doc Fetches the latest tags for a repo
--spec git_refresh_repo(binary()) -> any().
-git_refresh_repo(RepoName) ->
+-spec refresh_repo(binary()) -> any().
+refresh_repo(RepoName) ->
     {ok, RepoDir} = application:get_env(divapi, repo_dir),
     GitRepoName =  RepoDir ++ "/" ++ binary_to_list(RepoName) ++ ".git",
     Cmd = <<"git fetch origin master:master">>,
@@ -66,7 +66,7 @@ clone_bare(RepoUrl) ->
     git_cmd(Cmd, RepoDir).
 
 git_cmd(Cmd, WorkingDir) ->
-    Port = erlang:open_port({spawn, Cmd}, [exit_status, {cd, WorkingDir}, binary, use_stdio]),
+    Port = erlang:open_port({spawn, Cmd}, [exit_status, {cd, WorkingDir}, binary, stderr_to_stdout]),
     wait_for_file(Port, <<>>).
 
 wait_for_file(Port, File) ->
