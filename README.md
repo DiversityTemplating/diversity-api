@@ -12,18 +12,15 @@ https://www.erlang-solutions.com/downloads/download-erlang-otp
 Configuration
 -------------
 
-Before compiling you need to configure where the git repos should be cloned to, the credentials to diversity.io and
+Before compiling you need to configure where the git repos should be cloned to and
 what port to use for the api server. This is currently done in the `rel/sys.config` file:
 
 ``` rel/sys.config
 [{
     divapi,  [{repo_dir, "path/to/your/directory"},
-              {token, "s3cr3tt0k3n"},
               {port, 8181}]
 }].
 ```
-
-The token can be obtained in your Account settings page on diversity.io (`Profile settings -> Account`)
 
 To configure or change configuration after building the release, the sys.config used by the release are located in
 `_rel/divapi_release/releases/1/sys.config`.
@@ -59,6 +56,15 @@ GET
 
 Note: All the version selection methods can be used to get settings, settingsForm and files from the selected version.
 
-POST
 
-`/components/<component>/update` - The api fetches the latest tags from diversity.io
+To register a component
+-----------------------
+
+POST with parameter repo_url=url_to_repo
+`/components/<componentname>/register/`
+
+
+Updating a component
+-----------------------
+
+`/component/<componentname>/update`
