@@ -20,7 +20,20 @@ start(_Type, _Args) ->
     cowboy:start_http(diversity_api_listener, 100, [{port, Port}],
         [{env, [{dispatch, Dispatch}]}]
     ),
+    connect_to_swarm(),
 	divapi_sup:start_link().
 
 stop(_State) ->
 	ok.
+
+connect_to_swarm() ->
+    {ok, ListOfNodes} = application:get_env(divapi, nodes),
+    lists:foreach(
+        fun (NodeName) ->
+            Res = net_kernel:connect_node(NodeName),
+            io:format("~n~p~p~n", [NodeName, Res]),
+            ok
+        end,
+        ListOfNodes
+    ),
+    ok.
