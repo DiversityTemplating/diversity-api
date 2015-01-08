@@ -30,12 +30,14 @@ register_component(Req) ->
                     case git_utils:clone_bare(RepoUrl) of
                         error ->
                             send_reply(Req, error,
-                                       <<"Failed to register your diversity component.">>);
+                                       <<"Failed to register your diversity"
+                                         " component.">>);
                         _ ->
                             %% Successful registration, send to all other nodes.
-                            cast_to_nodes(git_utils, clone_bare, [RepoUrl]),
+                            rpc:eval_everywhere(git_utils, clone_bare, [RepoUrl]),
                             send_reply(Req, success,
-                                       <<"Successfully registered your diversity component.">>)
+                                       <<"Successfully registered your"
+                                         " diversity component.">>)
                     end
             end;
         {error, Msg}   -> send_reply(Req, error, Msg)
@@ -46,10 +48,11 @@ update_component(Req, ComponentName) ->
         true ->
             case git_utils:refresh_repo(ComponentName) of
                 error ->
-                    send_reply(Req, error, <<"Failed to update ", ComponentName/binary>>);
+                    send_reply(Req, error, <<"Failed to update ",
+                               ComponentName/binary>>);
                 _ ->
                     %% Successful update, send to all other nodes as well.
-                    cast_to_nodes(git_utils, refresh_repo, [ComponentName]),
+                    rpc:eval_everywhere(git_utils, refresh_repo, [ComponentName]),
                     send_reply(Req, success, <<"Component has been updated">>)
             end;
         false ->
@@ -77,12 +80,6 @@ fetch_get_post_data(Req) ->
         false ->
             {error, "Missing params"}
     end.
-
-%% Would love to uce rpc:multicall, but that is blocking and is not appropiate
-%% when more nodes get connected.
-cast_to_nodes(Module, Function, Args) ->
-    [rpc:cast(Node, Module, Function, Args) || Node <- nodes()],
-    ok.
 
 terminate(_Reason, _Req, _State) ->
     ok.
