@@ -4,7 +4,6 @@
 -export([start/2]).
 -export([stop/1]).
 
-
 start(_Type, _Args) ->
     inets:start(),
     Routes = [{"/", diversity_api_handler, []},
@@ -20,7 +19,11 @@ start(_Type, _Args) ->
     cowboy:start_http(diversity_api_listener, 100, [{port, Port}],
         [{env, [{dispatch, Dispatch}]}]
     ),
-	divapi_sup:start_link().
+    %% Get all nodes
+    {ok, ListOfNodes} = application:get_env(divapi, nodes),
+    %% Connect to all nodes.
+    [net_kernel:connect_node(Node) || Node <- ListOfNodes],
+    divapi_sup:start_link().
 
 stop(_State) ->
-	ok.
+    ok.
