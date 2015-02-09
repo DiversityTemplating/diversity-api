@@ -1,16 +1,16 @@
 {application, divapi, [
-	{description, ""},
-	{vsn, "0.3.0"},
-	{modules, []},
-	{registered, []},
-	{applications, [
-		kernel,
-		stdlib,
+    {description, ""},
+    {vsn, "0.3.0"},
+    {modules, []},
+    {registered, []},
+    {applications, [
+        kernel,
+	stdlib,
         inets,
         jiffy,
-		ssl,
-		cowboy
-	]},
-	{mod, {divapi_app, []}},
-	{env, []}
+	ssl,
+	cowboy
+    ]},
+   {mod, {divapi_app, []}},
+   {env, []}
 ]}.
