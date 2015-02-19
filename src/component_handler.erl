@@ -72,6 +72,9 @@ handle_component_request(Req, ComponentName) ->
                     %% consistent cache key
                     {Variables, _Req2} = cowboy_req:qs_vals(Req1),
                     serve_css(ComponentName, Tag, Variables);
+                [<<"thumbnail">>] ->
+                    {BrowserCacheKey, _} = cowboy_req:header(<<"if-none-match">>, Req1),
+                    serve_thumbnail(ComponentName, BrowserCacheKey);
                 _ ->
                     resource_not_found
             end;
@@ -173,6 +176,18 @@ serve_css(ComponentName, Tag, Variables0) ->
             {css, Files}
     end.
 
+serve_thumbnail(ComponentName, BrowserCacheKey) ->
+    case git_utils:get_diversity_json(ComponentName, <<"*">>) of
+        undefined ->
+            resource_not_found;
+        Json ->
+            {DiversityData} = jiffy:decode(Json),
+            ThumbnailPath = proplists:get_value(<<"thumbnail">>, DiversityData, undefined),
+            serve_file(ComponentName, <<"*">>, ThumbnailPath, BrowserCacheKey)
+    end.
+
+
+
 %% @doc Retrive al
 get_css(ComponentName, Tag, Variables, Paths) ->
     %% Retrive all files(CSS and SCSS).
@@ -188,6 +203,7 @@ get_css(ComponentName, Tag, Variables, Paths) ->
         end
     end,
     lists:map(GetFile, Paths).
+
 
 %% @doc Compile a sass-file with given variables
 sass_compile(ComponentName, Tag, Path, File, Variables) ->
