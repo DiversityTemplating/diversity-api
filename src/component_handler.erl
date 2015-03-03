@@ -50,6 +50,7 @@ component_exists(ComponentName) ->
 %% /ComponentName/Tag/                - Serve diversity.json
 %% /ComponentName/Tag/files/some.file - Serve a file
 %% /ComponentName/Tag/css             - Serve concatenated CSS
+%% /ComponentName/Tag/thumbnail       - Serve thumbnail
 handle_component_request(Req, ComponentName) ->
     {PathInfo, Req1} = cowboy_req:path_info(Req),
     ResultData = case PathInfo of

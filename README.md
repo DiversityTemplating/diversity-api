@@ -53,6 +53,7 @@ GET
 `/components/<component>/1.2.3/css?foo=bar` - All the component's CSS and SCSS compiled with the variables passed in via the query string
 `/components/<component>/1.2.3/settings` - settings attribute from the diversity.json from component with version 1.2.3
 `/components/<component>/1.2.3/settingsForm` - settingsForm attribute from the diversity.json from component with version 1.2.3
+`/components/<component>/1.2.3/thumbnail` - thumbnail picutre from component with version 1.2.3
 `/components/<component>/1.2.3/files/path/to/file.js` - file.js from component with version 1.2.3
 
 Note: All the version selection methods can be used to get settings, settingsForm and files from the selected version.
