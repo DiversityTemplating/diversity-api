@@ -8,9 +8,9 @@
 	    stdlib,
         inets,
         jiffy,
-        raven
-	ssl,
-	cowboy
+        raven,
+	    ssl,
+	    cowboy
     ]},
    {mod, {divapi_app, []}},
    {env, []}
