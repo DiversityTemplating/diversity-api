@@ -1,8 +1,9 @@
 PROJECT = divapi
 
-DEPS = cowboy jiffy libsass sassc
-dep_libsass = git https://github.com/sass/libsass.git
-dep_sassc = git https://github.com/sass/sassc.git
+DEPS = cowboy jiffy libsass sassc raven
+dep_libsass = git https://github.com/sass/libsass.git master
+dep_sassc = git https://github.com/sass/sassc.git master
+dep_raven = git https://github.com/soundrop/raven-erlang.git master
 
 TEST_DEPS = meck
 dep_meck = git https://github.com/eproxus/meck.git master
