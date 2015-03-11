@@ -65,6 +65,10 @@ To register a component
 POST with parameter repo_url=url_to_repo
 `/components/<componentname>/register/`
 
+Ex with curl.
+```sh
+$ curl -d repo_url=https://git.diversity.io/foobar/foo.git api.diversity.io/components/foo/register
+```
 
 Updating a component
 -----------------------
