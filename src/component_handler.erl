@@ -218,8 +218,8 @@ sass_compile(ComponentName, Tag, Path, File, Variables) ->
 
     %% Create a temporary sass file
     TmpName0 = {ComponentName, Tag, Path, Variables},
-    TmpName1 = integer_to_list(erlang:phash2(TmpName0)),
-    TmpPath = filename:join("/tmp/divapi/", TmpName1),
+    TmpName1 = integer_to_binary(erlang:phash2(TmpName0)),
+    TmpPath = filename:join(<<"/tmp/divapi/">>, TmpName1),
     ok = filelib:ensure_dir(TmpPath),
     ok = file:write_file(TmpPath, <<BinaryVars/binary, (iolist_to_binary(File))/binary>>),
 

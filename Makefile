@@ -10,7 +10,10 @@ dep_meck = git https://github.com/eproxus/meck.git master
 
 export SASS_LIBSASS_PATH = $(DEPS_DIR)/libsass
 
-all::
+all:: deps priv/
 	cp $(DEPS_DIR)/sassc/bin/sassc priv/
+
+priv/:
+	mkdir priv
 
 include erlang.mk
