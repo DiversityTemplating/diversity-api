@@ -37,6 +37,10 @@ To configure or change configuration after building the release, the sys.config 
 
 ## Usage
 
+### Version expansion
+- `*` - Will expand to the latest tag
+- `X` - Will expand into latest tag in given major
+- `X.Y` - Will expand into latest tag in given major and minor
 
 #### List all available components
 ```
