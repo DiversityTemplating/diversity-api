@@ -333,7 +333,7 @@ find_latest_version(VersionAcc, MaybeSwap, [Tag | Tags]) ->
 
 %% @doc Version to binary
 %% May throw error:badarg.
-version_to_binary({Major, Minor, Patch}) when Major > 0, Minor > 0, Patch > 0 ->
+version_to_binary({Major, Minor, Patch}) when Major >= 0, Minor >= 0, Patch >= 0 ->
     <<(integer_to_binary(Major))/binary, $.,
       (integer_to_binary(Minor))/binary, $.,
       (integer_to_binary(Patch))/binary>>.
@@ -403,7 +403,7 @@ serve_css_test() ->
     }.
 
 expand_tag_test_() ->
-    L = lists:seq(1,3),
+    L = lists:seq(0,3),
     Tags = [<<"invalid">> | [version_to_binary({X,Y,Z}) || X <- L, Y <- L, Z <- L]],
     [?_assertEqual(<<"3.3.3">>, expand_tag(<<"*">>, Tags)),
      ?_assertEqual(<<"1.3.3">>, expand_tag(<<"1">>, Tags)),
