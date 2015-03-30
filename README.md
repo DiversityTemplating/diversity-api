@@ -155,10 +155,10 @@ All the version selection methods can be used to get settings, settingsForm and 
 
 ## To register a component
 ```sh
-$ curl -X POST -d repo_url=https://github.com/foobar/foo.git example.com/components/foo/register
+curl -X POST -d repo_url=https://github.com/foobar/foo.git example.com/components/foo/register
 ```
 ## Updating a component
 
 ```sh
-$ curl -X POST example.com/components/foo/update
+curl -X POST example.com/components/foo/update
 ```
