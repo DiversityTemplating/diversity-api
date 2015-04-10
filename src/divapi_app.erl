@@ -8,6 +8,7 @@ start(_Type, _Args) ->
     inets:start(),
     Routes = [{"/", diversity_api_handler, []},
               {"/components/", component_list_handler, []},
+              {"/components/minified/", components_js_minifier, []},
               {"/components/:component/", component_handler, []},
               {"/components/:component/register", component_action, [register]},
               {"/components/:component/update", component_action, [update]},
