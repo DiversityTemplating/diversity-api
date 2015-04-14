@@ -17,9 +17,10 @@ start(_Type, _Args) ->
         {'_', Routes}
     ]),
     {ok, Port} = application:get_env(divapi, port),
-    cowboy:start_http(diversity_api_listener, 100, [{port, Port}],
-        [{env, [{dispatch, Dispatch}]}]
-    ),
+    cowboy:start_http(diversity_api_listener, 100, [{port, Port}], [
+        {compress, true},
+        {env, [{dispatch, Dispatch}]}
+    ]),
     %% Get all nodes
     {ok, ListOfNodes} = application:get_env(divapi, nodes),
     %% Connect to all nodes.
