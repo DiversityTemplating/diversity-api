@@ -37,6 +37,14 @@ To configure or change configuration after building the release, the sys.config 
 
 ## Usage
 
+### Javascript minify
+```
+GET /minify-js?my-component=0.0.3&my-component2=1.0.0
+
+Response:
+All script files minified and concatenated to one blob.
+```
+
 ### Version expansion
 - `*` - Will expand to the latest tag
 - `X` - Will expand into latest tag in given major

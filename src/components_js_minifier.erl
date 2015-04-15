@@ -6,8 +6,6 @@
 -export([handle/2]).
 -export([terminate/3]).
 
-%% Cowboy callbacks
-
 init(_, Req, _Opts) ->
     {ok, Req, []}.
 
