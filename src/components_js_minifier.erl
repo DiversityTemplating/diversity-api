@@ -13,16 +13,22 @@ init(_, Req, _Opts) ->
 
 handle(Req, State) ->
     {Components, Req1} = cowboy_req:qs_vals(Req),
-    {ok, Req2} = cowboy_req:chunked_reply(
-        200, [{<<"content-type">>, <<"application/javascript">>}], Req1
-    ),
-    pmap(
-        fun ({Component, Tag}) ->
-            Result = divapi_js_minifier:minify(Component, Tag),
-            cowboy_req:chunk(Result, Req2),
-            Result
+    Data = divapi_cache:get(
+        {minified_result, Components},
+        fun () ->
+            io:format("Rebuilding cache~n"),
+            Result = pmap(
+                fun ({Component, Tag}) ->
+                    divapi_js_minifier:minify(Component, Tag)
+                end,
+                Components
+            ),
+            iolist_to_binary(Result)
         end,
-        Components
+        1000 * 60 * 60 * 5 % 5 hours
+    ),
+    {ok, Req2} = cowboy_req:reply(
+        200, [{<<"content-type">>, <<"application/javascript">>}], Data, Req1
     ),
     {ok, Req2, State}.
 

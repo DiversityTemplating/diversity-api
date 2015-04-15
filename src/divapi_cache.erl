@@ -11,7 +11,7 @@
          terminate/2,
          code_change/3]).
 
--define(CACHE, cache).
+-define(CACHE, divapi_cache).
 
 -record(entry, {
           key   :: term(),

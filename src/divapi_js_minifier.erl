@@ -28,22 +28,23 @@ minify(ComponentName) ->
     ok.
 
 %% @doc Minifies all scripts for a specific component and tag. Returns minified file.
-minify(Component, Tag) ->
-    ScriptFilePaths = get_component_script_files(Component, Tag),
-    minify(Component, Tag, ScriptFilePaths).
+minify(_Component, <<"*">>) ->
+    throw(not_allowed);
+minify(ComponentName, Tag) ->
+    ScriptFilePaths = get_component_script_files(ComponentName, Tag),
+    minify(ComponentName, Tag, ScriptFilePaths).
 
 %% @doc Minifies all scripts for a specific component and tag. Returns minified file.
 %%      If component/tag already minfied, that result will be returned.
 minify(ComponentName, Tag, ScriptFilePaths) ->
     MinifiedPath = get_minify_path(ComponentName),
     ComponentMinifiedPath = filename:join(MinifiedPath, <<Tag/binary, "/">>),
-    ok = filelib:ensure_dir(<<ComponentMinifiedPath/binary, "/">>),
     FilePath = filename:join(ComponentMinifiedPath, <<"scripts.min.js">>),
-    case filelib:is_file(FilePath) of
-        true ->
-            {ok, FileBody} = file:read_file(FilePath),
+    case file:read_file(FilePath) of
+        {ok, FileBody} ->
             FileBody;
-        false ->
+        {error, enoent}->
+            ok = filelib:ensure_dir(<<ComponentMinifiedPath/binary, "/">>),
             FileBody = get_file_contents(ComponentName, Tag, ScriptFilePaths, <<>>),
             ok = file:write_file(FilePath, FileBody),
             FileBody
@@ -75,9 +76,9 @@ get_minified_tags(ComponentName) ->
 
 %% @doc Returns path to where each minified file is stored for component.
 get_minify_path(ComponentName) ->
-    MinifiedPath = case code:priv_dir(divapi) of
-        {error, bad_name} -> <<"priv/js_minfied/">>;
-        PrivDir           -> <<(list_to_binary(PrivDir))/binary, "/js_minified">>
+    MinifiedPath = case application:get_env(divapi, component_cache) of
+        undefined  -> <<"/var/diversity-api/js_minified">>;
+        {ok, Dir}  -> <<(unicode:characters_to_binary(Dir))/binary, "/js_minified">>
     end,
     filename:join(MinifiedPath, <<ComponentName/binary, "/">>).
 
@@ -101,7 +102,7 @@ get_file_type(ScriptFile) ->
     end.
 
 %% Fetch filec content from outside. And add it to the filecontent
-get_file_contents(Component, Tag, [{external, ScriptFilePath} | Rest], FileContent) ->
+get_file_contents(ComponentName, Tag, [{external, ScriptFilePath} | Rest], FileContent) ->
     Opts = [{body_format, binary}],
     Request = {binary_to_list(ScriptFilePath), []},
     ScriptFile = case httpc:request(get, Request, [], Opts) of
@@ -113,7 +114,7 @@ get_file_contents(Component, Tag, [{external, ScriptFilePath} | Rest], FileConte
                 200 -> Body
             end
     end,
-    get_file_contents(Component, Tag, Rest, <<FileContent/binary, ScriptFile/binary>>);
+    get_file_contents(ComponentName, Tag, Rest, <<FileContent/binary, ScriptFile/binary>>);
 %% No action needed, add it to the file acc as is
 get_file_contents(ComponentName, Tag, [{already_minified, ScriptFilePath} | Rest], FileContent) ->
     FileBody = git_utils:get_file(ComponentName, Tag, ScriptFilePath),
