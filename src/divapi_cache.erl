@@ -29,8 +29,13 @@ get(Key, Fun, Timeout) ->
         %% The file does not exist in the cache
         [] ->
             Value = Fun(),
-            gen_server:cast(?CACHE, {put, Key, Value, Timeout}),
-            Value;
+            case divapi:is_prod() of
+                true ->
+                    Value;
+                false ->
+                    gen_server:cast(?CACHE, {put, Key, Value, Timeout}),
+                    Value
+            end;
         %% Exists in cache
         %% Reset the files credits to it's file size
         [Entry] ->

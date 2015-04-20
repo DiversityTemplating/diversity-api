@@ -4,6 +4,8 @@
 -export([start/2]).
 -export([stop/1]).
 
+-export([is_production/0]).
+
 start(_Type, _Args) ->
     inets:start(),
     Routes = [{"/", diversity_api_handler, []},
@@ -29,3 +31,10 @@ start(_Type, _Args) ->
 
 stop(_State) ->
     ok.
+
+is_production() ->
+    %% Decide what kind of mode we are in.
+    case application:get_env(production, nodes) of
+        undefined -> false;
+        {ok, IsProd} -> IsProd
+    end.
