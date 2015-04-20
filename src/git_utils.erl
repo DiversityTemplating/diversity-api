@@ -3,11 +3,17 @@
 %% API
 -export([tags/1, get_diversity_json/2, refresh_repo/1, get_file/3, clone_bare/1]).
 
+
+%%% TODO: All git utils will be needing a working dir sent to each path.
+%%%       This module should not need to know anything about the application!
+
+
 %% @doc Returns a list with all tags in a git repository
 -spec tags(binary()) -> [binary()].
 tags(RepoName) ->
     Cmd = <<"git tag">>,
-    case get_git_result(RepoName, Cmd) of
+    ComponentDir = get_component_dir(RepoName),
+    case git_cmd(Cmd, ComponentDir) of
         error ->
             [];
         <<>>  ->
@@ -31,6 +37,7 @@ refresh_repo(RepoName) ->
     git_cmd(Cmd, GitRepoName).
 
 get_file(RepoName, Tag, FilePath) ->
+
     get_git_file(RepoName, Tag, FilePath).
 
 %% ----------------------------------------------------------------------------
@@ -41,22 +48,29 @@ get_file(RepoName, Tag, FilePath) ->
 -spec get_git_file(RepoName :: binary(), Tag :: binary(),
                    FilePath :: binary) -> binary() | undefined.
 get_git_file(RepoName, Tag, FilePath) ->
-    Cmd = <<"git --no-pager show ", Tag/binary, ":", FilePath/binary>>,
-    case get_git_result(RepoName, Cmd) of
-        FileBin when is_binary(FileBin) -> FileBin;
-        error                           -> undefined;
-        ok                              -> <<>> %% Command succesful but empty result!
+    case divapi:is_prod() of
+        true ->
+            %% Read the file!!
+            ComponentDir = get_component_dir(RepoName),
+            Path = filename:join(ComponentDir, FilePath),
+            file:read(Path);
+        false ->
+            Cmd = <<"git --no-pager show ", Tag/binary, ":", FilePath/binary>>,
+            ComponentDir = get_component_dir(RepoName),
+            case git_cmd(Cmd, ComponentDir) of
+                FileBin when is_binary(FileBin) -> FileBin;
+                error                           -> undefined;
+                ok                              -> <<>> %% Command succesful but empty result!
+            end
     end.
 
-get_git_result(RepoName, Cmd) ->
+get_component_dir(RepoName) ->
     {ok, RepoDir} = application:get_env(divapi, repo_dir),
-    GitRepoDir =  RepoDir ++ "/" ++ binary_to_list(RepoName) ++ ".git",
-    %% Clone git repo if non-existing in configured dir
-    case filelib:is_dir(GitRepoDir) of
-        false -> error; %% Repo does not exist, noop.
-        true -> ok %% Checkout not needed
+    RepoDir1 = case is_binary(RepoDir) of
+        true -> RepoDir;
+        false -> unicode:character_to_binary(RepoDir)
     end,
-    git_cmd(Cmd, GitRepoDir).
+    filename:join(RepoDir1, <<"/", RepoName/binary, ".git">>).
 
 clone_bare(RepoUrl) ->
     {ok, RepoDir} = application:get_env(divapi, repo_dir),

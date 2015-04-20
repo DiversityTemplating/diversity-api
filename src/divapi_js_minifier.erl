@@ -77,7 +77,7 @@ minify(_Component, _Tag, [], FileContent) ->
 %% @doc Returns all scriptfiles listed in the diversity.json setting. It will tag
 %%      each file if it's external, jsfile or already_minified.
 get_component_script_files(ComponentName, Tag) ->
-    {DiversityProps} = get_diversity_json(ComponentName, Tag),
+    {DiversityProps} = divapi_component:diversity_json(ComponentName, Tag),
     ScriptFiles = proplists:get_value(<<"script">>, DiversityProps),
     lists:map(fun get_file_type/1, ScriptFiles).
 
@@ -99,14 +99,6 @@ get_file_type(ScriptFile) ->
             %% It's not a minified file. Assume internal
             {jsfile, ScriptFile}
     end.
-
-%% @doc Fetches the diversity json for a spcific component/tag. Will cache the result.
-get_diversity_json(ComponentName, Tag) ->
-    divapi_cache:get(
-        {diversity_json, ComponentName, Tag},
-        fun () -> jiffy:decode(git_utils:get_diversity_json(ComponentName, Tag)) end,
-        1000 * 60 * 60 * 5 % 5 hours
-     ).
 
 %% @doc Fetches a list of already minified tags for a specific component.
 get_minified_tags(ComponentName) ->

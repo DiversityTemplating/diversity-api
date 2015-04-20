@@ -12,11 +12,6 @@
 -define(CSS_HEADER, [{<<"content-type">>, <<"text/css">>}]).
 -define(ACCESS_CONTROL_HEADER, [{<<"Access-Control-Allow-Origin">>, <<"*">>}]).
 
-
-%%
-%% Cowboy callbacks
-%%
-
 init(_, Req, _Opts) ->
     {ok, Req, #state{}}.
 
@@ -55,29 +50,56 @@ handle_component_request(Req, ComponentName) ->
     {PathInfo, Req1} = cowboy_req:path_info(Req),
     ResultData = case PathInfo of
         undefined ->
-            {json, jiffy:encode(divapi_components:tags(ComponentName))};
+            {json, jiffy:encode(divapi_component:tags(ComponentName))};
         [PartialTag | Routes] ->
             %% Try to expand the tag into an existing one
-            try expand_tag(PartialTag, get_tags(ComponentName)) of
+            try expand_tag(PartialTag, divapi_component:tags(ComponentName)) of
                 Tag ->
                     case Routes of
                         [] ->
-                            serve_diversity_json(ComponentName, Tag);
-                        [Settings] when Settings =:= <<"settings">>;
-                                        Settings =:= <<"settingsForm">> ->
-                            serve_setting_json(ComponentName, Tag, Settings);
+                            {json, divapi_component:diversity_json(ComponentName, Tag)};
+                        [Settings] when Settings =:= <<"settings">> ->
+                            {json, divapi_component:settings(ComponentName, Tag)};
+                        [Settings] when Settings =:= <<"settingsForm">> ->
+                            {json, divapi_component:settingsform(Tag, Settings)};
                         [<<"files">> | Path] ->
+                            %% Both Files and thumbnails are acting weird. Streamline and make sure they look better.
                             File = filename:join(Path),
-                            {BrowserCacheKey, _} = cowboy_req:header(<<"if-none-match">>, Req1),
-                            serve_file(ComponentName, Tag, File, BrowserCacheKey);
+                            {BrowserEtag, _} = cowboy_req:header(<<"if-none-match">>),
+                            Etag = <<Tag/binary, File/binary>>,
+                            case BrowserEtag of
+                                Etag ->
+                                    file_not_changed;
+                                _    ->
+                                    {Mime, Type, []} = cow_mimetypes:all(File),
+                                    Headers = [{<<"content-type">>,
+                                                << Mime/binary, "/", Type/binary >>}],
+                                    Headers1 = case Tag of
+                                        <<"HEAD">> ->
+                                            Headers;
+                                        _ ->
+                                            Headers ++ [{<<"Cache-Control">>, <<"max-age=90000">>},
+                                                        {<<"Etag">>, <<Tag/binary, File/binary>>}]
+                                    end,
+                                    case divapi_component:file(ComponentName, Tag, File) of
+                                        FileBin when is_binary(FileBin) ->
+                                            {ok, {Headers1, FileBin}};
+                                        FileFailure ->
+                                            FileFailure
+                                    end
+                            end;
                         [<<"css">>] ->
                             %% Retrive additional variables and sort them to get a
                             %% consistent cache key
                             {Variables, _Req2} = cowboy_req:qs_vals(Req1),
-                            serve_css(ComponentName, Tag, Variables);
+                            {css, divapi_component:css(ComponentName, Tag, Variables)};
                         [<<"thumbnail">>] ->
-                            {BrowserCacheKey, _} = cowboy_req:header(<<"if-none-match">>, Req1),
-                            serve_thumbnail(ComponentName, BrowserCacheKey);
+                            {BrowserEtag, _} = cowboy_req:header(<<"if-none-match">>, Req1),
+                            Etag = <<"*", ComponentName/binary>>,
+                            case BrowserEtag of
+                                Etag -> file_not_changed;
+                                _    -> divapi_component:thumbnail(ComponentName)
+                            end;
                         _ ->
                             resource_not_found
                     end
@@ -209,52 +231,6 @@ terminate(_Reason, _Req, _State) ->
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").
-
-%% Testdata
--define(REPO, <<"test-component">>).
--define(TAG,  <<"0.0.1">>).
--define(TEST_CSS, <<".body { font-family: test; }">>).
--define(TEST_SCSS, <<"$test-color: #FFFFFF\n.test { background: $test-color; }">>).
--define(DIVERSITY_JSON, {[{style, [<<"test.css">>, <<"test.scss">>]}]}).
-
-serve_css_test() ->
-    {setup,
-     fun() ->
-        %% Mock the git_utils module
-        meck:new(git_utils),
-        meck:expect(
-            git_utils, get_diversity_json,
-            fun (?REPO, ?TAG) -> jiffy:encode(?DIVERSITY_JSON) end
-        ),
-        meck:expect(
-            git_utils, get_file,
-            fun (?REPO, ?TAG, "test.css")  -> ?TEST_CSS;
-                (?REPO, ?TAG, "test.scss") -> ?TEST_SCSS
-            end
-        ),
-        application:start(divapi)
-     end,
-     fun(_) ->
-         application:stop(divapi),
-         meck:unload(git_utils)
-     end,
-     [
-      {"Serve CSS files",
-       fun () ->
-           Variables = [{<<"test-color">>, <<"#000000">>}],
-           Expected =
-               <<
-                 %% The css should just be concatenated
-                 ?TEST_CSS/binary,
-
-                 %% The scss should be compiled with the given
-                 %% variables and then concatenated
-                 ".test { background: #000000; }"
-               >>,
-          ?assertEqual({css, Expected}, serve_css(?REPO, ?TAG, Variables))
-       end}
-     ]
-    }.
 
 expand_tag_test_() ->
     L = lists:seq(0,3),

@@ -1,39 +1,47 @@
 -module(divapi_component).
 
--export([tags/1, ]).
+-export([tags/1, diversity_json/2, settings/2, settingsForm/2, file/3, css/3, thumbnail/1]).
 
 %% @doc Retrive all tags for a given component
 tags(ComponentName) ->
     git_utils:tags(ComponentName).
 
-%% @doc Serve all tags for a given component.
-serve_tags(ComponentName) ->
-    {json, jiffy:encode(tags(ComponentName))}.
+%% @doc Fetches the diversity json for a spcific component/tag. Will cache the result.
+diversity_json(ComponentName, Tag) ->
+    divapi_cache:get(
+        {diversity_json, ComponentName, Tag},
+        fun () -> jiffy:decode(git_utils:get_diversity_json(ComponentName, Tag)) end,
+        1000 * 60 * 60 * 5 % 5 hours
+     ).
 
-%% @doc Serve diversity.json for a given component and tag.
-serve_diversity_json(ComponentName, Tag) ->
-    case git_utils:get_diversity_json(ComponentName, Tag) of
-        undefined -> resource_not_found;
-        Data      -> {json, Data}
-    end.
-
-%% @doc Serve the settings/settingsForm from diversity.json
-serve_setting_json(ComponentName, Tag, Settings) ->
-    case git_utils:get_diversity_json(ComponentName, Tag) of
+%% @doc Serve the settings from diversity.json
+settings(ComponentName, Tag) ->
+    case diversity_json(ComponentName, Tag) of
         undefined ->
             resource_not_found;
         Json ->
             {DiversityData} = jiffy:decode(Json),
-            SettingsBinary = proplists:get_value(Settings, DiversityData, {[]}),
+            SettingsBinary = proplists:get_value(<<"settings">>, DiversityData, {[]}),
             SettingsJson = jiffy:encode(SettingsBinary),
-            {json, SettingsJson}
+            SettingsJson
     end.
 
+%% @doc Serve the settingsForm from diversity.json
+settingsForm(ComponentName, Tag) ->
+    case diversity_json(ComponentName, Tag) of
+        undefined ->
+            resource_not_found;
+        Json ->
+            {DiversityData} = jiffy:decode(Json),
+            SettingsBinary = proplists:get_value(<<"settingsForm">>, DiversityData, {[]}),
+            SettingsJson = jiffy:encode(SettingsBinary),
+            SettingsJson
+    end.
+
+
 %% @doc Serve an arbitrary file from the repository
-serve_file(_ComponentName, Tag, File, BrowserCacheKey) when <<Tag/binary, File/binary>> ==
-                                                            BrowserCacheKey ->
-    file_not_changed;
-serve_file(ComponentName, Tag, File, _BrowserCacheKey) ->
+
+file(ComponentName, Tag, File) ->
     case git_utils:get_file(ComponentName, Tag, File) of
         undefined ->
             resource_not_found;
@@ -41,22 +49,14 @@ serve_file(ComponentName, Tag, File, _BrowserCacheKey) ->
             %% Should get a reason from git_utils get_file command.
             {error, <<"Error while fetching file">>};
         FileBin ->
-            {Mime, Type, []} = cow_mimetypes:all(File),
-            Headers = [{<<"content-type">>,
-                        << Mime/binary, "/", Type/binary >>}],
-            Headers1 = case Tag of
-                <<"HEAD">> -> Headers;
-                _          -> Headers ++ [{<<"Cache-Control">>, <<"max-age=90000">>},
-                                          {<<"Etag">>, <<Tag/binary, File/binary>>}]
-            end,
-            {ok, {Headers1, FileBin}}
+            FileBin
     end.
 
 %% @doc Serve all css and sass (concatenated into one file)
 %% This function will check out the diversity.json-file from the components repository
 %% and check the styles-property to find all the css- and sass-files. The sass files are
 %% first compiled then all css is concatenated and returned to the user.
-serve_css(ComponentName, Tag, Variables0) ->
+css(ComponentName, Tag, Variables0) ->
     case git_utils:get_diversity_json(ComponentName, Tag) of
         undefined ->
             resource_not_found;
@@ -76,22 +76,18 @@ serve_css(ComponentName, Tag, Variables0) ->
                 fun () -> get_css(ComponentName, Tag, Variables1, StylePaths) end,
                 1000 * 60 * 60 * 5 % 5 hours
              ),
-
-            %% Return them as an iolist() (concatenated)
             {css, Files}
     end.
 
-serve_thumbnail(ComponentName, BrowserCacheKey) ->
+thumbnail(ComponentName) ->
     case git_utils:get_diversity_json(ComponentName, <<"*">>) of
         undefined ->
             resource_not_found;
         Json ->
             {DiversityData} = jiffy:decode(Json),
             ThumbnailPath = proplists:get_value(<<"thumbnail">>, DiversityData, undefined),
-            serve_file(ComponentName, <<"*">>, ThumbnailPath, BrowserCacheKey)
+            file(ComponentName, <<"*">>, ThumbnailPath)
     end.
-
-
 
 %% @doc Retrive al
 get_css(ComponentName, Tag, Variables, Paths) ->
@@ -149,3 +145,55 @@ wait_for_response(Port, File) ->
             %% Either not a git repo or operation failed. No need to close port it' already done.
             error
     end.
+
+-ifdef(TEST).
+
+-include_lib("eunit/include/eunit.hrl").
+
+%% Testdata
+-define(REPO, <<"test-component">>).
+-define(TAG,  <<"0.0.1">>).
+-define(TEST_CSS, <<".body { font-family: test; }">>).
+-define(TEST_SCSS, <<"$test-color: #FFFFFF\n.test { background: $test-color; }">>).
+-define(DIVERSITY_JSON, {[{style, [<<"test.css">>, <<"test.scss">>]}]}).
+
+serve_css_test() ->
+    {setup,
+     fun() ->
+        %% Mock the git_utils module
+        meck:new(git_utils),
+        meck:expect(
+            git_utils, get_diversity_json,
+            fun (?REPO, ?TAG) -> jiffy:encode(?DIVERSITY_JSON) end
+        ),
+        meck:expect(
+            git_utils, get_file,
+            fun (?REPO, ?TAG, "test.css")  -> ?TEST_CSS;
+                (?REPO, ?TAG, "test.scss") -> ?TEST_SCSS
+            end
+        ),
+        application:start(divapi)
+     end,
+     fun(_) ->
+         application:stop(divapi),
+         meck:unload(git_utils)
+     end,
+     [
+      {"Serve CSS files",
+       fun () ->
+           Variables = [{<<"test-color">>, <<"#000000">>}],
+           Expected =
+               <<
+                 %% The css should just be concatenated
+                 ?TEST_CSS/binary,
+
+                 %% The scss should be compiled with the given
+                 %% variables and then concatenated
+                 ".test { background: #000000; }"
+               >>,
+          ?assertEqual({css, Expected}, css(?REPO, ?TAG, Variables))
+       end}
+     ]
+    }.
+
+-endif.
