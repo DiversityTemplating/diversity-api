@@ -14,7 +14,6 @@ handle(Req, State) ->
     Data = divapi_cache:get(
         {minified_result, Components},
         fun () ->
-            io:format("Rebuilding cache~n"),
             Result = pmap(
                 fun ({Component, Tag}) ->
                     divapi_js_minifier:minify(Component, Tag)
