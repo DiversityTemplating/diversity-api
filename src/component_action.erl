@@ -52,8 +52,10 @@ update_component(Req, ComponentName) ->
                                ComponentName/binary>>);
                 _ ->
                     %% Successful update, send to all other nodes as well.
+                    send_reply(Req, success, <<"Component has been updated">>),
                     rpc:eval_everywhere(git_utils, refresh_repo, [ComponentName]),
-                    send_reply(Req, success, <<"Component has been updated">>)
+                    rpc:eval_everywhere(divapi_js_minifier, minify, [ComponentName]),
+                    ok
             end;
         false ->
             send_reply(Req, error, <<"Component does not exists.">>)

@@ -7,6 +7,7 @@
 start(_Type, _Args) ->
     inets:start(),
     Routes = [{"/", diversity_api_handler, []},
+              {"/minify-js", components_js_minifier, []},
               {"/components/", component_list_handler, []},
               {"/components/:component/", component_handler, []},
               {"/components/:component/register", component_action, [register]},
@@ -16,9 +17,10 @@ start(_Type, _Args) ->
         {'_', Routes}
     ]),
     {ok, Port} = application:get_env(divapi, port),
-    cowboy:start_http(diversity_api_listener, 100, [{port, Port}],
-        [{env, [{dispatch, Dispatch}]}]
-    ),
+    cowboy:start_http(diversity_api_listener, 100, [{port, Port}], [
+        {compress, true},
+        {env, [{dispatch, Dispatch}]}
+    ]),
     %% Get all nodes
     {ok, ListOfNodes} = application:get_env(divapi, nodes),
     %% Connect to all nodes.
