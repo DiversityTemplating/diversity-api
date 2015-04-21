@@ -27,17 +27,49 @@ handle(Req, State=#state{}) ->
 %% @doc Handle a GET-request
 handle_get(Req, _State=#state{}) ->
     {ComponentName, Req1} = cowboy_req:binding(component, Req),
-    case component_exists(ComponentName) of
-        true ->
-            handle_component_request(Req1, ComponentName);
-        false ->
-            reply_from_result_data(Req1, resource_not_found)
+    case application:get_env(divapi, stage) of
+        undefined ->
+            case divapi_component:exists(ComponentName) of
+                true ->
+                    handle_component_request(Req1, divapi_component:dir(ComponentName));
+                false ->
+                    reply_from_result_data(Req1, resource_not_found)
+            end;
+        {ok, StageEnv} ->
+            %% Get the subdomain for staging env as key for checking component.
+            {Host, Req2} = cowboy_req:host(Req1),
+            [Stage, _] = binary:split(Host, <<".">>),
+            case divapi_component:exists(ComponentName, Stage) of
+                true ->
+                    lager:info("Local request"),
+                    handle_component_request(Req2, divapi_component:dir(ComponentName, Stage));
+                false ->
+                    %% Do a fallback call!!
+                    FallBackUrl = proplists:get_value(fallback, StageEnv),
+                    Opts = [{body_format, binary}],
+                    {Path, Req3} = cowboy_req:path(Req2),
+                    {Qs, Req4} = cowboy_req:qs(Req3),
+                    Url = <<"http://", FallBackUrl/binary, Path/binary, "?", Qs/binary>>,
+                    Request = {unicode:characters_to_list(Url), []},
+                    Result = case httpc:request(get, Request, [], Opts) of
+                        {ok, {{_Version, Status, _ReasonPhrase}, Headers, Body}} ->
+                            case Status of
+                                404 -> resource_not_found;
+                                500 -> {error, <<"Failed to fetch from fallback">>};
+                                200 -> {ok, Body, Headers}
+                            end
+                    end,
+                    case Result of
+                        {ok, ReplyBody, ReplyHeaders} ->
+                            lager:info("~p", [ReplyHeaders]),
+                            ContentType = proplists:get_value("content-type", ReplyHeaders),
+                            cowboy_req:reply(200, [{<<"content-type">>, unicode:characters_to_binary(ContentType)}] ++ ?ACCESS_CONTROL_HEADER, ReplyBody, Req);
+                            % cowboy_req:reply(200, ReplyBody, Req);
+                        _ ->
+                            reply_from_result_data(Req4, Result)
+                    end
+            end
     end.
-
-%% @doc Check if a component is exists in the repository directory
-component_exists(ComponentName) ->
-    {ok, RepoDir} = application:get_env(divapi, repo_dir),
-    filelib:is_dir(RepoDir ++ "/" ++ binary_to_list(ComponentName) ++ ".git").
 
 %% @doc Handle a component-request
 %% The possible routes to this function is:
@@ -46,20 +78,21 @@ component_exists(ComponentName) ->
 %% /ComponentName/Tag/files/some.file - Serve a file
 %% /ComponentName/Tag/css             - Serve concatenated CSS
 %% /ComponentName/Tag/thumbnail       - Serve thumbnail
-handle_component_request(Req, ComponentName) ->
+handle_component_request(Req, ComponentPath) ->
     {PathInfo, Req1} = cowboy_req:path_info(Req),
     ResultData = case PathInfo of
         undefined ->
-            {json, jiffy:encode(divapi_component:tags(ComponentName))};
+            {json, jiffy:encode(divapi_component:tags(ComponentPath))};
         [PartialTag | Routes] ->
             %% Try to expand the tag into an existing one
-            try expand_tag(PartialTag, divapi_component:tags(ComponentName)) of
+            try expand_tag(PartialTag, divapi_component:tags(ComponentPath)) of
                 Tag ->
+                    lager:info("~p", [Tag]),
                     case Routes of
                         [] ->
-                            {json, divapi_component:diversity_json(ComponentName, Tag)};
+                            {json, divapi_component:diversity_json(ComponentPath, Tag)};
                         [Settings] when Settings =:= <<"settings">> ->
-                            {json, divapi_component:settings(ComponentName, Tag)};
+                            {json, divapi_component:settings(ComponentPath, Tag)};
                         [Settings] when Settings =:= <<"settingsForm">> ->
                             {json, divapi_component:settingsform(Tag, Settings)};
                         [<<"files">> | Path] ->
@@ -81,7 +114,7 @@ handle_component_request(Req, ComponentName) ->
                                             Headers ++ [{<<"Cache-Control">>, <<"max-age=90000">>},
                                                         {<<"Etag">>, <<Tag/binary, File/binary>>}]
                                     end,
-                                    case divapi_component:file(ComponentName, Tag, File) of
+                                    case divapi_component:file(ComponentPath, Tag, File) of
                                         FileBin when is_binary(FileBin) ->
                                             {ok, {Headers1, FileBin}};
                                         FileFailure ->
@@ -92,13 +125,13 @@ handle_component_request(Req, ComponentName) ->
                             %% Retrive additional variables and sort them to get a
                             %% consistent cache key
                             {Variables, _Req2} = cowboy_req:qs_vals(Req1),
-                            {css, divapi_component:css(ComponentName, Tag, Variables)};
+                            {css, divapi_component:css(ComponentPath, Tag, Variables)};
                         [<<"thumbnail">>] ->
                             {BrowserEtag, _} = cowboy_req:header(<<"if-none-match">>, Req1),
-                            Etag = <<"*", ComponentName/binary>>,
+                            Etag = <<"css*", ComponentPath/binary>>,
                             case BrowserEtag of
                                 Etag -> file_not_changed;
-                                _    -> divapi_component:thumbnail(ComponentName)
+                                _    -> divapi_component:thumbnail(ComponentPath)
                             end;
                         _ ->
                             resource_not_found
@@ -125,8 +158,6 @@ reply_from_result_data(Req, {json, Data}) ->
     cowboy_req:reply(200, ?ACCESS_CONTROL_HEADER ++ ?JSON_HEADER, Data, Req);
 reply_from_result_data(Req, {css, Data}) ->
     cowboy_req:reply(200, ?ACCESS_CONTROL_HEADER ++ ?CSS_HEADER, Data, Req).
-
-
 
 %% @doc Expand an incoming tag into the latest matching tag
 %% Supported formats are:

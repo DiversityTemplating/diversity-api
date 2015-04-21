@@ -29,7 +29,7 @@ get(Key, Fun, Timeout) ->
         %% The file does not exist in the cache
         [] ->
             Value = Fun(),
-            case divapi:is_prod() of
+            case divapi_app:is_production() of
                 true ->
                     Value;
                 false ->

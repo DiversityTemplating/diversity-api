@@ -1,22 +1,23 @@
 -module(divapi_component).
 
--export([tags/1, diversity_json/2, settings/2, settingsForm/2, file/3, css/3, thumbnail/1]).
+-export([tags/1, diversity_json/2, settings/2, settingsForm/2, file/3, css/3, thumbnail/1,
+         dir/1, dir/2, exists/1, exists/2]).
 
 %% @doc Retrive all tags for a given component
-tags(ComponentName) ->
-    git_utils:tags(ComponentName).
+tags(ComponentPath) ->
+    git_utils:tags(ComponentPath).
 
 %% @doc Fetches the diversity json for a spcific component/tag. Will cache the result.
-diversity_json(ComponentName, Tag) ->
+diversity_json(ComponentPath, Tag) ->
     divapi_cache:get(
-        {diversity_json, ComponentName, Tag},
-        fun () -> jiffy:decode(git_utils:get_diversity_json(ComponentName, Tag)) end,
+        {diversity_json, ComponentPath, Tag},
+        fun () -> jiffy:decode(file(ComponentPath, Tag,<<"diversity.json">>)) end,
         1000 * 60 * 60 * 5 % 5 hours
      ).
 
 %% @doc Serve the settings from diversity.json
-settings(ComponentName, Tag) ->
-    case diversity_json(ComponentName, Tag) of
+settings(ComponentPath, Tag) ->
+    case diversity_json(ComponentPath, Tag) of
         undefined ->
             resource_not_found;
         Json ->
@@ -27,8 +28,8 @@ settings(ComponentName, Tag) ->
     end.
 
 %% @doc Serve the settingsForm from diversity.json
-settingsForm(ComponentName, Tag) ->
-    case diversity_json(ComponentName, Tag) of
+settingsForm(ComponentPath, Tag) ->
+    case diversity_json(ComponentPath, Tag) of
         undefined ->
             resource_not_found;
         Json ->
@@ -38,26 +39,34 @@ settingsForm(ComponentName, Tag) ->
             SettingsJson
     end.
 
-
-%% @doc Serve an arbitrary file from the repository
-
-file(ComponentName, Tag, File) ->
-    case git_utils:get_file(ComponentName, Tag, File) of
-        undefined ->
-            resource_not_found;
-        error ->
-            %% Should get a reason from git_utils get_file command.
-            {error, <<"Error while fetching file">>};
-        FileBin ->
-            FileBin
+%% @doc Serve an arbitrary file for the component
+file(ComponentPath, Tag, File) ->
+    case divapi_app:is_production() of
+        true ->
+            %% Read the file!!
+            Path = filename:join(ComponentPath, File),
+            case file:read(Path) of
+                {ok, FileBin} -> FileBin;
+                _ -> resource_not_found
+            end;
+        false ->
+            case git_utils:get_file(ComponentPath, Tag, File) of
+                undefined ->
+                    resource_not_found;
+                error ->
+                    %% Should get a reason from git_utils get_file command.
+                    {error, <<"Error while fetching file">>};
+                FileBin ->
+                    FileBin
+            end
     end.
 
 %% @doc Serve all css and sass (concatenated into one file)
 %% This function will check out the diversity.json-file from the components repository
 %% and check the styles-property to find all the css- and sass-files. The sass files are
 %% first compiled then all css is concatenated and returned to the user.
-css(ComponentName, Tag, Variables0) ->
-    case git_utils:get_diversity_json(ComponentName, Tag) of
+css(ComponentPath, Tag, Variables0) ->
+    case git_utils:get_diversity_json(ComponentPath, Tag) of
         undefined ->
             resource_not_found;
         DiversityData ->
@@ -72,42 +81,64 @@ css(ComponentName, Tag, Variables0) ->
             %% To get a consitent cache key we need to make sure the proplist is sorted
             Variables1 = lists:sort(Variables0),
             Files = divapi_cache:get(
-                {css, ComponentName, Tag, Variables1},
-                fun () -> get_css(ComponentName, Tag, Variables1, StylePaths) end,
+                {css, ComponentPath, Tag, Variables1},
+                fun () -> get_css(ComponentPath, Tag, Variables1, StylePaths) end,
                 1000 * 60 * 60 * 5 % 5 hours
              ),
             {css, Files}
     end.
 
-thumbnail(ComponentName) ->
-    case git_utils:get_diversity_json(ComponentName, <<"*">>) of
+thumbnail(ComponentPath) ->
+    case git_utils:get_diversity_json(ComponentPath, <<"*">>) of
         undefined ->
             resource_not_found;
         Json ->
             {DiversityData} = jiffy:decode(Json),
             ThumbnailPath = proplists:get_value(<<"thumbnail">>, DiversityData, undefined),
-            file(ComponentName, <<"*">>, ThumbnailPath)
+            file(ComponentPath, <<"*">>, ThumbnailPath)
     end.
 
 %% @doc Retrive al
-get_css(ComponentName, Tag, Variables, Paths) ->
+get_css(ComponentPath, Tag, Variables, Paths) ->
     %% Retrive all files(CSS and SCSS).
     %% Compile all SCSS-files to CSS and then concatenate all of them
     GetFile = fun (Path) ->
         %% Retrive the temporary checked out file from the repository
-        File = git_utils:get_file(ComponentName, Tag, Path),
+        File = file(ComponentPath, Tag, Path),
         case filename:extension(Path) of
             <<".scss">> ->
-                sass_compile(ComponentName, Tag, Path, File, Variables);
+                sass_compile(ComponentPath, Tag, Path, File, Variables);
             <<".css">> ->
                 File
         end
     end,
     lists:map(GetFile, Paths).
 
+dir(ComponentPath) ->
+    {ok, RepoDir} = application:get_env(divapi, repo_dir),
+    RepoDir1 = case is_binary(RepoDir) of
+        true -> RepoDir;
+        false -> unicode:character_to_binary(RepoDir)
+    end,
+    <<RepoDir1/binary, "/", ComponentPath/binary, ".git">>.
+
+dir(ComponentPath, Stage) ->
+    {ok, RepoDir} = application:get_env(divapi, repo_dir),
+    RepoDir1 = case is_binary(RepoDir) of
+        true -> RepoDir;
+        false -> unicode:character_to_binary(RepoDir)
+    end,
+    <<RepoDir1/binary, "/", Stage/binary, "/", ComponentPath/binary, ".git">>.
+
+exists(ComponentPath) ->
+    filelib:is_dir(dir(ComponentPath)).
+
+exists(ComponentPath, Stage) ->
+    lager:info("Eeeeeh... ~p", [dir(ComponentPath, Stage)]),
+    filelib:is_dir(dir(ComponentPath, Stage)).
 
 %% @doc Compile a sass-file with given variables
-sass_compile(ComponentName, Tag, Path, File, Variables) ->
+sass_compile(ComponentPath, Tag, Path, File, Variables) ->
 
     %% Construct the SASS-variables
     VarToBinary = fun ({Variable, Value}, BinAcc) ->
@@ -117,7 +148,7 @@ sass_compile(ComponentName, Tag, Path, File, Variables) ->
     BinaryVars = lists:foldl(VarToBinary, <<>>, Variables),
 
     %% Create a temporary sass file
-    TmpName0 = {ComponentName, Tag, Path, Variables},
+    TmpName0 = {ComponentPath, Tag, Path, Variables},
     TmpName1 = integer_to_binary(erlang:phash2(TmpName0)),
     TmpPath = filename:join(<<"/tmp/divapi/">>, TmpName1),
     ok = filelib:ensure_dir(TmpPath),

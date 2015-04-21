@@ -10,6 +10,7 @@
         jiffy,
         raven,
 	    ssl,
+        lager,
 	    cowboy
     ]},
    {mod, {divapi_app, []}},
