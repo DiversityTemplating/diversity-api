@@ -34,7 +34,7 @@ stop(_State) ->
 
 is_production() ->
     %% Decide what kind of mode we are in.
-    case application:get_env(production, nodes) of
-        undefined -> false;
-        {ok, IsProd} -> IsProd
+    case application:get_env(divapi, stage) of
+        undefined -> true;
+        {ok, _ProdEnv} -> false
     end.

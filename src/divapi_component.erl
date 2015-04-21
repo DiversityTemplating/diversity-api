@@ -22,9 +22,8 @@ settings(ComponentPath, Tag) ->
             resource_not_found;
         Json ->
             {DiversityData} = jiffy:decode(Json),
-            SettingsBinary = proplists:get_value(<<"settings">>, DiversityData, {[]}),
-            SettingsJson = jiffy:encode(SettingsBinary),
-            SettingsJson
+            Settings = proplists:get_value(<<"settings">>, DiversityData, {[]}),
+            Settings
     end.
 
 %% @doc Serve the settingsForm from diversity.json
@@ -34,22 +33,24 @@ settingsForm(ComponentPath, Tag) ->
             resource_not_found;
         Json ->
             {DiversityData} = jiffy:decode(Json),
-            SettingsBinary = proplists:get_value(<<"settingsForm">>, DiversityData, {[]}),
-            SettingsJson = jiffy:encode(SettingsBinary),
-            SettingsJson
+            SettingsForm = proplists:get_value(<<"settingsForm">>, DiversityData, {[]}),
+            SettingsForm
     end.
 
 %% @doc Serve an arbitrary file for the component
 file(ComponentPath, Tag, File) ->
     case divapi_app:is_production() of
-        true ->
+        false ->
+            lager:info("Reading file directly"),
             %% Read the file!!
             Path = filename:join(ComponentPath, File),
-            case file:read(Path) of
+            lager:info("~p", [Path]),
+            case file:read_file(Path) of
                 {ok, FileBin} -> FileBin;
                 _ -> resource_not_found
             end;
-        false ->
+        true ->
+            lager:info("Reading file from git archive"),
             case git_utils:get_file(ComponentPath, Tag, File) of
                 undefined ->
                     resource_not_found;
@@ -134,7 +135,6 @@ exists(ComponentPath) ->
     filelib:is_dir(dir(ComponentPath)).
 
 exists(ComponentPath, Stage) ->
-    lager:info("Eeeeeh... ~p", [dir(ComponentPath, Stage)]),
     filelib:is_dir(dir(ComponentPath, Stage)).
 
 %% @doc Compile a sass-file with given variables

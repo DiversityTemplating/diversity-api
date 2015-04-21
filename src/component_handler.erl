@@ -36,40 +36,53 @@ handle_get(Req, _State=#state{}) ->
                     reply_from_result_data(Req1, resource_not_found)
             end;
         {ok, StageEnv} ->
-            %% Get the subdomain for staging env as key for checking component.
-            {Host, Req2} = cowboy_req:host(Req1),
-            [Stage, _] = binary:split(Host, <<".">>),
-            case divapi_component:exists(ComponentName, Stage) of
-                true ->
-                    lager:info("Local request"),
-                    handle_component_request(Req2, divapi_component:dir(ComponentName, Stage));
-                false ->
-                    %% Do a fallback call!!
-                    FallBackUrl = proplists:get_value(fallback, StageEnv),
-                    Opts = [{body_format, binary}],
-                    {Path, Req3} = cowboy_req:path(Req2),
-                    {Qs, Req4} = cowboy_req:qs(Req3),
-                    Url = <<"http://", FallBackUrl/binary, Path/binary, "?", Qs/binary>>,
-                    Request = {unicode:characters_to_list(Url), []},
-                    Result = case httpc:request(get, Request, [], Opts) of
-                        {ok, {{_Version, Status, _ReasonPhrase}, Headers, Body}} ->
-                            case Status of
-                                404 -> resource_not_found;
-                                500 -> {error, <<"Failed to fetch from fallback">>};
-                                200 -> {ok, Body, Headers}
-                            end
-                    end,
-                    case Result of
-                        {ok, ReplyBody, ReplyHeaders} ->
-                            lager:info("~p", [ReplyHeaders]),
-                            ContentType = proplists:get_value("content-type", ReplyHeaders),
-                            cowboy_req:reply(200, [{<<"content-type">>, unicode:characters_to_binary(ContentType)}] ++ ?ACCESS_CONTROL_HEADER, ReplyBody, Req);
-                            % cowboy_req:reply(200, ReplyBody, Req);
-                        _ ->
-                            reply_from_result_data(Req4, Result)
+            handle_stage_request(Req, ComponentName, StageEnv)
+    end.
+
+handle_stage_request(Req, ComponentName, StageEnv) ->
+    %% Get the subdomain for staging env as key for checking component.
+    {Host, Req1} = cowboy_req:host(Req),
+    Stage = case proplists:get_value(staging_regexp, StageEnv) of
+        undefined ->
+            <<>>;
+        StagingRegExp ->
+            case re:run(Host, StagingRegExp) of
+                {match, [{Pos, _Length}]} ->
+                    {_, SplittedUrl} = split_binary(Host, Pos),
+                    [StagingName, _] = binary:split(SplittedUrl, <<".">>),
+                    StagingName
+            end
+    end,
+    case divapi_component:exists(ComponentName, Stage) of
+        true ->
+            handle_component_request(Req1, divapi_component:dir(ComponentName, Stage));
+        false ->
+            %% Do a fallback call!!
+            FallBackUrl = proplists:get_value(fallback, StageEnv),
+            Opts = [{body_format, binary}],
+            {Path, Req2} = cowboy_req:path(Req1),
+            {Qs, Req3} = cowboy_req:qs(Req2),
+            Url = <<"http://", FallBackUrl/binary, Path/binary, "?", Qs/binary>>,
+            Request = {unicode:characters_to_list(Url), []},
+            Result = case httpc:request(get, Request, [], Opts) of
+                {ok, {{_Version, Status, _ReasonPhrase}, Headers, Body}} ->
+                    case Status of
+                        404 -> resource_not_found;
+                        500 -> {error, <<"Failed to fetch from fallback">>};
+                        200 -> {ok, Body, Headers}
                     end
+            end,
+            case Result of
+                {ok, ReplyBody, ReplyHeaders} ->
+                    ContentType = proplists:get_value("content-type", ReplyHeaders),
+                    Headers0 = [{<<"content-type">>, unicode:characters_to_binary(ContentType)}]
+                              ++ ?ACCESS_CONTROL_HEADER,
+                    cowboy_req:reply(200, Headers0, ReplyBody, Req);
+                _ ->
+                    reply_from_result_data(Req3, Result)
             end
     end.
+
 
 %% @doc Handle a component-request
 %% The possible routes to this function is:
@@ -87,36 +100,34 @@ handle_component_request(Req, ComponentPath) ->
             %% Try to expand the tag into an existing one
             try expand_tag(PartialTag, divapi_component:tags(ComponentPath)) of
                 Tag ->
-                    lager:info("~p", [Tag]),
                     case Routes of
                         [] ->
-                            {json, divapi_component:diversity_json(ComponentPath, Tag)};
+                            {json,
+                             jiffy:encode(divapi_component:diversity_json(ComponentPath, Tag))};
                         [Settings] when Settings =:= <<"settings">> ->
-                            {json, divapi_component:settings(ComponentPath, Tag)};
+                            {json, jiffy:encode(divapi_component:settings(ComponentPath, Tag))};
                         [Settings] when Settings =:= <<"settingsForm">> ->
-                            {json, divapi_component:settingsform(Tag, Settings)};
+                            {json, jiffy:encode(divapi_component:settingsform(Tag, Settings))};
                         [<<"files">> | Path] ->
                             %% Both Files and thumbnails are acting weird. Streamline and make sure they look better.
                             File = filename:join(Path),
-                            {BrowserEtag, _} = cowboy_req:header(<<"if-none-match">>),
-                            Etag = <<Tag/binary, File/binary>>,
+                            {BrowserEtag, _} = cowboy_req:header(<<"if-none-match">>, Req1),
+                            Etag = case divapi_app:is_production() of
+                                false -> <<>>;
+                                true  -> <<Tag/binary, File/binary>>
+                            end,
                             case BrowserEtag of
                                 Etag ->
                                     file_not_changed;
                                 _    ->
                                     {Mime, Type, []} = cow_mimetypes:all(File),
-                                    Headers = [{<<"content-type">>,
-                                                << Mime/binary, "/", Type/binary >>}],
-                                    Headers1 = case Tag of
-                                        <<"HEAD">> ->
-                                            Headers;
-                                        _ ->
-                                            Headers ++ [{<<"Cache-Control">>, <<"max-age=90000">>},
-                                                        {<<"Etag">>, <<Tag/binary, File/binary>>}]
-                                    end,
+                                    Headers =
+                                        [{<<"content-type">>, << Mime/binary, "/", Type/binary >>},
+                                         {<<"Cache-Control">>, <<"max-age=90000">>},
+                                         {<<"Etag">>, <<Tag/binary, File/binary>>}],
                                     case divapi_component:file(ComponentPath, Tag, File) of
                                         FileBin when is_binary(FileBin) ->
-                                            {ok, {Headers1, FileBin}};
+                                            {ok, {Headers, FileBin}};
                                         FileFailure ->
                                             FileFailure
                                     end
@@ -128,7 +139,10 @@ handle_component_request(Req, ComponentPath) ->
                             {css, divapi_component:css(ComponentPath, Tag, Variables)};
                         [<<"thumbnail">>] ->
                             {BrowserEtag, _} = cowboy_req:header(<<"if-none-match">>, Req1),
-                            Etag = <<"css*", ComponentPath/binary>>,
+                            Etag = case divapi_app:is_production() of
+                                false -> <<>>;
+                                true  -> <<"css*", ComponentPath/binary>>
+                            end,
                             case BrowserEtag of
                                 Etag -> file_not_changed;
                                 _    -> divapi_component:thumbnail(ComponentPath)

@@ -30,9 +30,9 @@ get(Key, Fun, Timeout) ->
         [] ->
             Value = Fun(),
             case divapi_app:is_production() of
-                true ->
-                    Value;
                 false ->
+                    Value;
+                true ->
                     gen_server:cast(?CACHE, {put, Key, Value, Timeout}),
                     Value
             end;
