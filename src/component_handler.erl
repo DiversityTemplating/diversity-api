@@ -103,11 +103,11 @@ handle_component_request(Req, ComponentPath) ->
                     case Routes of
                         [] ->
                             {json,
-                             jiffy:encode(divapi_component:diversity_json(ComponentPath, Tag))};
+                             jiffy:encode(divapi_component:diversity_json(ComponentPath, Tag), [pretty])};
                         [Settings] when Settings =:= <<"settings">> ->
-                            {json, jiffy:encode(divapi_component:settings(ComponentPath, Tag))};
+                            {json, jiffy:encode(divapi_component:settings(ComponentPath, Tag), [pretty])};
                         [Settings] when Settings =:= <<"settingsForm">> ->
-                            {json, jiffy:encode(divapi_component:settingsform(Tag, Settings))};
+                            {json, jiffy:encode(divapi_component:settingsform(Tag, Settings), [pretty])};
                         [<<"files">> | Path] ->
                             %% Both Files and thumbnails are acting weird. Streamline and make sure they look better.
                             File = filename:join(Path),

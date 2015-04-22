@@ -19,8 +19,13 @@ what port to use for the api server. This is currently done in the `rel/sys.conf
 ```Erlang
 [{
     divapi,  [{repo_dir, "path/to/your/directory"},
-              {nodes, []}
-              {port, 8181}]
+              {nodes, []},
+              {port, 8181},
+              %% Optional
+              stage, [
+                {fallback, <<"api.diversity.io">>},
+                {staging_regexp, <<"\\w*stage.*">>}
+              ]}]
 }].
 ```
 ### Note:
@@ -29,6 +34,22 @@ To configure or change configuration after building the release, the sys.config 
 
 ## Building
 `make` - Fetches dependencies, compiles and builds a release in _rel/divapi_release/
+
+## Staging
+There is a way to test and develop components locally and use the same endpoints.
+You need to set a fallback url e.g. api.diversity.io and optional a regexp or hardcoded staging env.
+
+```Erlang
+stage, [
+  {fallback, <<"api.diversity.io">>},
+  {staging_regexp, <<"\\w*stage.*">>}
+]}
+```
+
+If the staging url is ```example.com.foostage.company.org```, it will with the regexp in example
+split it to ```example.com``` and ```foostage.company.org```. Then later split the later part and
+use ```foostage``` as a subfolder on ```repo_dir``` setting.
+
 
 ## Running
 - `./_rel/divapi_release/bin/divapi_release start` - start the server
