@@ -163,7 +163,7 @@ handle_component_request(Req, ComponentPath) ->
 reply_from_result_data(Req, file_not_changed) ->
     cowboy_req:reply(304, ?ACCESS_CONTROL_HEADER, Req);
 reply_from_result_data(Req, resource_not_found) ->
-    cowboy_req:reply(404, Req);
+    cowboy_req:reply(404, ?ACCESS_CONTROL_HEADER, Req);
 reply_from_result_data(Req, {error, Reason}) ->
     cowboy_req:reply(500, ?ACCESS_CONTROL_HEADER, Reason, Req);
 reply_from_result_data(Req, {ok, {Headers, Data}}) ->
