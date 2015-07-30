@@ -67,7 +67,7 @@ file(ComponentPath, Tag, File) ->
 %% and check the styles-property to find all the css- and sass-files. The sass files are
 %% first compiled then all css is concatenated and returned to the user.
 css(ComponentPath, Tag, Variables0) ->
-    case git_utils:get_diversity_json(ComponentPath, Tag) of
+    case get_diversity_json(ComponentPath, Tag) of
         undefined ->
             resource_not_found;
         DiversityData ->
@@ -90,7 +90,7 @@ css(ComponentPath, Tag, Variables0) ->
     end.
 
 thumbnail(ComponentPath) ->
-    case git_utils:get_diversity_json(ComponentPath, <<"*">>) of
+    case get_diversity_json(ComponentPath, <<"*">>) of
         undefined ->
             resource_not_found;
         Json ->
@@ -194,7 +194,7 @@ serve_css_test() ->
         %% Mock the git_utils module
         meck:new(git_utils),
         meck:expect(
-            git_utils, get_diversity_json,
+            get_diversity_json,
             fun (?REPO, ?TAG) -> jiffy:encode(?DIVERSITY_JSON) end
         ),
         meck:expect(
