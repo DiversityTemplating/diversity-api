@@ -83,7 +83,7 @@ css(ComponentPath, Tag, Variables0) ->
                 {css, ComponentPath, Tag, Variables1},
                 fun () -> get_css(ComponentPath, Tag, Variables1, StylePaths) end,
                 1000 * 60 * 60 * 5 % 5 hours
-             ),
+            ),
             {css, Files}
     end.
 
@@ -110,7 +110,7 @@ get_css(ComponentPath, Tag, Variables, Paths) ->
                 File
         end
     end,
-    lists:map(GetFile, Paths).
+    iolist_to_binary(lists:map(GetFile, Paths)).
 
 dir(ComponentPath) ->
     {ok, RepoDir} = application:get_env(divapi, repo_dir),
