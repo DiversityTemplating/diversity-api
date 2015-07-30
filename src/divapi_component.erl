@@ -70,9 +70,7 @@ css(ComponentPath, Tag, Variables0) ->
     case diversity_json(ComponentPath, Tag) of
         undefined ->
             resource_not_found;
-        DiversityData ->
-            {DiversityJSON} = jiffy:decode(DiversityData),
-
+        DiversityJSON ->
             %% The style property may be either a single file or a list of files
             StylePaths = case proplists:get_value(<<"style">>, DiversityJSON, []) of
                 Path  when is_binary(Path) -> [Path];
@@ -93,8 +91,7 @@ thumbnail(ComponentPath) ->
     case diversity_json(ComponentPath, <<"*">>) of
         undefined ->
             resource_not_found;
-        Json ->
-            {DiversityData} = jiffy:decode(Json),
+        DiversityData ->
             ThumbnailPath = proplists:get_value(<<"thumbnail">>, DiversityData, undefined),
             file(ComponentPath, <<"*">>, ThumbnailPath)
     end.
