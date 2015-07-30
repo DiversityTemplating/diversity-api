@@ -119,7 +119,7 @@ dir(ComponentPath) ->
     {ok, RepoDir} = application:get_env(divapi, repo_dir),
     RepoDir1 = case is_binary(RepoDir) of
         true -> RepoDir;
-        false -> unicode:character_to_binary(RepoDir)
+        false -> unicode:characters_to_binary(RepoDir)
     end,
     <<RepoDir1/binary, "/", ComponentPath/binary, ".git">>.
 
@@ -127,7 +127,7 @@ dir(ComponentPath, Stage) ->
     {ok, RepoDir} = application:get_env(divapi, repo_dir),
     RepoDir1 = case is_binary(RepoDir) of
         true -> RepoDir;
-        false -> unicode:character_to_binary(RepoDir)
+        false -> unicode:characters_to_binary(RepoDir)
     end,
     <<RepoDir1/binary, "/", Stage/binary, "/", ComponentPath/binary, ".git">>.
 
