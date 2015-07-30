@@ -84,7 +84,7 @@ css(ComponentPath, Tag, Variables0) ->
                 fun () -> get_css(ComponentPath, Tag, Variables1, StylePaths) end,
                 1000 * 60 * 60 * 5 % 5 hours
             ),
-            {css, Files}
+            Files
     end.
 
 thumbnail(ComponentPath) ->
