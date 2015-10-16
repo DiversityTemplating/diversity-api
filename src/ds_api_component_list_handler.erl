@@ -1,4 +1,4 @@
--module(component_list_handler).
+-module(ds_api_component_list_handler).
 -behaviour(cowboy_http_handler).
 
 -export([init/3]).
@@ -18,7 +18,7 @@ handle(Req, State=#state{}) ->
     {ok, Req4} = case Path of
         <<"/components/">> ->
             {QueryVal, Req3} = cowboy_req:qs_val(<<"grouping">>, Req2),
-            {ok, RepoDir} = application:get_env(divapi, repo_dir),
+            {ok, RepoDir} = application:get_env(ds_api, repo_dir),
             {ok, PublicProjects} = file:list_dir(RepoDir),
             Projects = case QueryVal of
                 undefined ->
@@ -39,14 +39,14 @@ handle(Req, State=#state{}) ->
 %% @doc Returns a list with new maps only containing the keys in information_fields
 -spec get_components_information([binary()]) -> [map()].
 get_components_information(Components) ->
-    {ok, RepoDir} = application:get_env(divapi, repo_dir),
+    {ok, RepoDir} = application:get_env(ds_api, repo_dir),
     lists:foldl(
         fun(Component, Acc) ->
             case filelib:is_dir(RepoDir ++ "/" ++ Component) of
                 true ->
                     ComponentAdjusted =
                         unicode:characters_to_binary(string:left(Component, length(Component) - 4)),
-                    case git_utils:get_diversity_json(ComponentAdjusted, <<"HEAD">>) of
+                    case ds_api_git:get_diversity_json(ComponentAdjusted, <<"HEAD">>) of
                         undefined ->
                             Acc;
                         ComponentJson ->
@@ -65,13 +65,13 @@ get_components_information(Components) ->
 %% @doc Returns a list of component names filtered by given grouping
 -spec filter_projects_by_grouping([binary()], binary()) -> [binary()].
 filter_projects_by_grouping(Components, Grouping) ->
-    {ok, RepoDir} = application:get_env(divapi, repo_dir),
+    {ok, RepoDir} = application:get_env(ds_api, repo_dir),
     lists:foldl(fun(Component,  Acc) ->
         case filelib:is_dir(RepoDir ++ "/" ++ Component) of
             true ->
                 ComponentAdjusted =
                     unicode:characters_to_binary(string:left(Component, length(Component) - 4)),
-                case git_utils:get_diversity_json(ComponentAdjusted, <<"HEAD">>) of
+                case ds_api_git:get_diversity_json(ComponentAdjusted, <<"HEAD">>) of
                     undefined ->
                         Acc;
                     ComponentJson ->

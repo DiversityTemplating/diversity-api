@@ -1,4 +1,4 @@
--module(git_utils).
+-module(ds_api_git).
 
 %% API
 -export([tags/1, refresh_repo/1, get_file/3, clone_bare/1]).
@@ -42,7 +42,7 @@ get_git_file(RepoPath, Tag, FilePath) ->
     end.
 
 clone_bare(RepoUrl) ->
-    {ok, RepoDir} = application:get_env(divapi, repo_dir),
+    {ok, RepoDir} = application:get_env(ds_api, repo_dir),
     %% Ensure it exists if not try to create it.
     ok = filelib:ensure_dir(RepoDir ++ "/"),
     Cmd = <<"git clone --bare ", RepoUrl/binary>>,

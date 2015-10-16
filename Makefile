@@ -1,32 +1,45 @@
-PROJECT = divapi
+PROJECT = ds_api
+PROJECT_DESCRIPTION = A CDN for Diversity components
+PROJECT_VERSION = 0.5.0
+PROJECT_REGISTERED = ds_api_cache
 
-DEPS = cowboy jiffy raven lager
-dep_lager = git https://github.com/basho/lager.git master
+DEPS = cowboy jiffy raven
 dep_raven = git https://github.com/soundrop/raven-erlang.git master
 
 TEST_DEPS = meck
 dep_meck = git https://github.com/eproxus/meck.git master
+
+LOCAL_DEPS = ssl inets
 
 ERLC_COMPILE_OPTS= +'{parse_transform, lager_transform}'
 
 ERLC_OPTS += $(ERLC_COMPILE_OPTS)
 TEST_ERLC_OPTS += $(ERLC_COMPILE_OPTS)
 
+CURRENT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 
-include erlang.mk
+all:: priv/sassc
 
-$(DEPS_DIR)/libsass:
+distclean::
+	@rm -rf deps/libsass
+	@rm -rf deps/sassc
+	@rm -rf priv/sassc
+
+deps/libsass:
 	@git clone https://github.com/sass/libsass.git $@
 	@make -C $@
 
-$(DEPS_DIR)/sassc: $(DEPS_DIR)/libsass
+deps/sassc: deps/libsass
 	@git clone https://github.com/sass/sassc.git $@
-	@make SASS_LIBSASS_PATH=$< -C $@
+	@make SASS_LIBSASS_PATH=$(CURRENT_DIR)/$< -C $@
 
-priv/sassc: $(DEPS_DIR)/sassc priv
+priv/sassc: deps/sassc priv
 	@cp $</bin/sassc $@
 
 priv:
 	@mkdir -p priv
 
-all:: priv/sassc
+erlang.mk: 
+	@curl https://raw.githubusercontent.com/ninenines/erlang.mk/master/erlang.mk > $@
+
+include erlang.mk

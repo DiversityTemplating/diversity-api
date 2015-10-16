@@ -1,15 +1,15 @@
--module(divapi_component).
+-module(ds_api_component).
 
 -export([tags/1, diversity_json/2, settings/2, settingsForm/2, file/3, css/3, thumbnail/1,
          dir/1, dir/2, exists/1, exists/2]).
 
 %% @doc Retrive all tags for a given component
 tags(ComponentPath) ->
-    git_utils:tags(ComponentPath).
+    ds_api_git:tags(ComponentPath).
 
 %% @doc Fetches the diversity json for a spcific component/tag. Will cache the result.
 diversity_json(ComponentPath, Tag) ->
-    divapi_cache:get(
+    ds_api_cache:get(
         {diversity_json, ComponentPath, Tag},
         fun () -> jiffy:decode(file(ComponentPath, Tag,<<"diversity.json">>)) end,
         1000 * 60 * 60 * 5 % 5 hours
@@ -39,7 +39,7 @@ settingsForm(ComponentPath, Tag) ->
 
 %% @doc Serve an arbitrary file for the component
 file(ComponentPath, Tag, File) ->
-    case divapi_app:is_production() of
+    case ds_api_app:is_production() of
         false ->
             lager:info("Reading file directly"),
             %% Read the file!!
@@ -51,7 +51,7 @@ file(ComponentPath, Tag, File) ->
             end;
         true ->
             lager:info("Reading file from git archive"),
-            case git_utils:get_file(ComponentPath, Tag, File) of
+            case ds_api_git:get_file(ComponentPath, Tag, File) of
                 undefined ->
                     resource_not_found;
                 error ->
@@ -79,7 +79,7 @@ css(ComponentPath, Tag, Variables0) ->
 
             %% To get a consitent cache key we need to make sure the proplist is sorted
             Variables1 = lists:sort(Variables0),
-            Files = divapi_cache:get(
+            Files = ds_api_cache:get(
                 {css, ComponentPath, Tag, Variables1},
                 fun () -> get_css(ComponentPath, Tag, Variables1, StylePaths) end,
                 1000 * 60 * 60 * 5 % 5 hours
@@ -113,20 +113,12 @@ get_css(ComponentPath, Tag, Variables, Paths) ->
     iolist_to_binary(lists:map(GetFile, Paths)).
 
 dir(ComponentPath) ->
-    {ok, RepoDir} = application:get_env(divapi, repo_dir),
-    RepoDir1 = case is_binary(RepoDir) of
-        true -> RepoDir;
-        false -> unicode:characters_to_binary(RepoDir)
-    end,
-    <<RepoDir1/binary, "/", ComponentPath/binary, ".git">>.
+    dir(ComponentPath, <<>>).
 
 dir(ComponentPath, Stage) ->
-    {ok, RepoDir} = application:get_env(divapi, repo_dir),
-    RepoDir1 = case is_binary(RepoDir) of
-        true -> RepoDir;
-        false -> unicode:characters_to_binary(RepoDir)
-    end,
-    <<RepoDir1/binary, "/", Stage/binary, "/", ComponentPath/binary, ".git">>.
+    ComponentsDir = ds_api:components_dir(),
+    ComponentDir = filename:join([ComponentsDir, Stage, ComponentPath]),
+    <<ComponentDir/binary, ".git">>.
 
 exists(ComponentPath) ->
     filelib:is_dir(dir(ComponentPath)).
@@ -189,22 +181,22 @@ serve_css_test() ->
     {setup,
      fun() ->
         %% Mock the git_utils module
-        meck:new(git_utils),
+        meck:new(ds_api_git),
         meck:expect(
             diversity_json,
             fun (?REPO, ?TAG) -> jiffy:encode(?DIVERSITY_JSON) end
         ),
         meck:expect(
-            git_utils, get_file,
+            ds_api_git, get_file,
             fun (?REPO, ?TAG, "test.css")  -> ?TEST_CSS;
                 (?REPO, ?TAG, "test.scss") -> ?TEST_SCSS
             end
         ),
-        application:start(divapi)
+        application:start(ds_api)
      end,
      fun(_) ->
-         application:stop(divapi),
-         meck:unload(git_utils)
+         application:stop(ds_api),
+         meck:unload(ds_api_git)
      end,
      [
       {"Serve CSS files",

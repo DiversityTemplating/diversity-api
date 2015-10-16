@@ -1,4 +1,4 @@
--module(component_action).
+-module(ds_api_component_action).
 -behaviour(cowboy_http_handler).
 
 -export([init/3]).
@@ -27,14 +27,14 @@ register_component(Req) ->
                 undefined ->
                     send_reply(Req, error, <<"No repository url supplied">>);
                 RepoUrl ->
-                    case git_utils:clone_bare(RepoUrl) of
+                    case ds_api_git:clone_bare(RepoUrl) of
                         error ->
                             send_reply(Req, error,
                                        <<"Failed to register your diversity"
                                          " component.">>);
                         _ ->
                             %% Successful registration, send to all other nodes.
-                            rpc:eval_everywhere(git_utils, clone_bare, [RepoUrl]),
+                            rpc:eval_everywhere(ds_api_git, clone_bare, [RepoUrl]),
                             send_reply(Req, success,
                                        <<"Successfully registered your"
                                          " diversity component.">>)
@@ -46,7 +46,7 @@ register_component(Req) ->
 update_component(Req, ComponentName) ->
     case component_exists(ComponentName) of
         true ->
-            case git_utils:refresh_repo(ComponentName) of
+            case ds_api_git:refresh_repo(ComponentName) of
                 error ->
                     send_reply(Req, error, <<"Failed to update ",
                                ComponentName/binary>>);
@@ -62,7 +62,7 @@ update_component(Req, ComponentName) ->
     end.
 
 component_exists(ComponentName) ->
-    {ok, RepoDir} = application:get_env(divapi, repo_dir),
+    {ok, RepoDir} = application:get_env(ds_api, repo_dir),
     filelib:is_dir(RepoDir ++ "/" ++ binary_to_list(ComponentName) ++ ".git").
 
 send_reply(Req, error, Msg) ->

@@ -1,4 +1,4 @@
--module(diversity_api_handler).
+-module(ds_api_handler).
 -behaviour(cowboy_http_handler).
 
 -export([init/3]).
