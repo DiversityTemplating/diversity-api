@@ -1,219 +1,217 @@
 -module(ds_api_component).
 
--export([tags/1, diversity_json/2, settings/2, settingsForm/2, file/3, css/3, thumbnail/1,
-         dir/1, dir/2, exists/1, exists/2]).
+-export([path/1]).
+-export([path/2]).
+-export([exists/1]).
+-export([exists/2]).
+-export([exists/3]).
+-export([list/0]).
+-export([list/1]).
+-export([versions/1]).
+-export([diversityJSON/2]).
+-export([settings/2]).
+-export([settingsForm/2]).
+-export([file/3]).
+%-export([css/4]).
+-export([thumbnail/2]).
+-export([tag_to_version/1]).
+-export([version_to_tag/1]).
+-export([expand_tag_to_version/2]).
 
-%% @doc Retrive all tags for a given component
-tags(ComponentPath) ->
-    ds_api_git:tags(ComponentPath).
+path(Component) ->
+    filename:join(ds_api:components_dir(), Component).
 
-%% @doc Fetches the diversity json for a spcific component/tag. Will cache the result.
-diversity_json(ComponentPath, Tag) ->
+path(Component, Tag) ->
+    filename:join([path(Component), versions, Tag]).
+
+path(Component, Tag, File) ->
+    filename:join(path(Component, Tag), files, File).
+
+exists(Component) ->
+    filelib:is_dir(path(Component)).
+
+exists(Component, Tag) ->
+    filelib:is_dir(path(Component, Tag)).
+
+exists(Component, Tag, File) ->
+    file:is_file(path(Component, Tag, File)).
+
+list() ->
+    ds_api_component_mgr:list_components().
+
+list(Groups) ->
+    lists:filter(
+        fun (Component) ->
+            case diversityJSON(Component, head) of
+                #{<<"grouping">> := Groupings} ->
+                    HasGroup = fun(Group) -> lists:member(Group, Groupings) end,
+                    lists:all(HasGroup, Groups);
+                _NoGroupings ->
+                    false
+            end
+        end,
+        list()
+    ).
+
+versions(Component) ->
+    ds_api_component_mgr:list_versions(Component).
+
+diversityJSON(Component, Tag) ->
+    Timeout = case Tag of
+        head -> 0;
+        _    -> 5* 60 * 60 * 1000 %% 5 hours
+    end,
     ds_api_cache:get(
-        {diversity_json, ComponentPath, Tag},
-        fun () -> jiffy:decode(file(ComponentPath, Tag,<<"diversity.json">>)) end,
-        1000 * 60 * 60 * 5 % 5 hours
+        {diversityJSON, Component, Tag},
+        fun () -> 
+            {ok, File} = file(Component, Tag, <<"diversity.json">>),
+            jiffy:decode(File, [return_maps])
+        end,
+        Timeout
      ).
 
-%% @doc Serve the settings from diversity.json
-settings(ComponentPath, Tag) ->
-    case diversity_json(ComponentPath, Tag) of
-        undefined ->
-            resource_not_found;
-        Json ->
-            {DiversityData} = jiffy:decode(Json),
-            Settings = proplists:get_value(<<"settings">>, DiversityData, {[]}),
-            Settings
+settings(Component, Tag) ->
+    case diversityJSON(Component, Tag) of
+        #{<<"settings">> := Settings} -> Settings;
+        _NoSettings                   -> undefined
     end.
 
-%% @doc Serve the settingsForm from diversity.json
-settingsForm(ComponentPath, Tag) ->
-    case diversity_json(ComponentPath, Tag) of
-        undefined ->
-            resource_not_found;
-        Json ->
-            {DiversityData} = jiffy:decode(Json),
-            SettingsForm = proplists:get_value(<<"settingsForm">>, DiversityData, {[]}),
-            SettingsForm
+settingsForm(Component, Tag) ->
+    case diversityJSON(Component, Tag) of
+        #{<<"settingsForm">> := SettingsForm} -> SettingsForm;
+        _NoSettingsForm                       -> undefined
     end.
 
-%% @doc Serve an arbitrary file for the component
-file(ComponentPath, Tag, File) ->
-    case ds_api_app:is_production() of
-        false ->
-            lager:info("Reading file directly"),
-            %% Read the file!!
-            Path = filename:join(ComponentPath, File),
-            lager:info("~p", [Path]),
-            case file:read_file(Path) of
-                {ok, FileBin} -> FileBin;
-                _ -> resource_not_found
-            end;
-        true ->
-            lager:info("Reading file from git archive"),
-            case ds_api_git:get_file(ComponentPath, Tag, File) of
-                undefined ->
-                    resource_not_found;
-                error ->
-                    %% Should get a reason from git_utils get_file command.
-                    {error, <<"Error while fetching file">>};
-                FileBin ->
-                    FileBin
-            end
+file(Component, Tag, File) ->
+    file:read_file(path(Component, Tag, File)).
+
+%css(Component, Tag, #{styles := Styles, hash := Hash, variables := Variables}) ->
+%    Output = filename:join([path(Component, Tag), sass, Hash]),
+%    case filelib:is_file(Output) of
+%        true  -> Output;
+%        false -> sass_compile(Input, Output, Variables)
+%    end.
+
+thumbnail(Component, Tag) ->
+    case diversityJSON(Component, Tag) of
+        #{<<"thumbnail">> := Thumbnail} -> path(Component, Tag, Thumbnail);
+        _NoThumbnail                    -> undefined
     end.
-
-%% @doc Serve all css and sass (concatenated into one file)
-%% This function will check out the diversity.json-file from the components repository
-%% and check the styles-property to find all the css- and sass-files. The sass files are
-%% first compiled then all css is concatenated and returned to the user.
-css(ComponentPath, Tag, Variables0) ->
-    case diversity_json(ComponentPath, Tag) of
-        undefined ->
-            resource_not_found;
-        {DiversityJSON} ->
-            %% The style property may be either a single file or a list of files
-            StylePaths = case proplists:get_value(<<"style">>, DiversityJSON, []) of
-                Path  when is_binary(Path) -> [Path];
-                Paths when is_list(Paths)  -> Paths
-            end,
-
-            %% To get a consitent cache key we need to make sure the proplist is sorted
-            Variables1 = lists:sort(Variables0),
-            Files = ds_api_cache:get(
-                {css, ComponentPath, Tag, Variables1},
-                fun () -> get_css(ComponentPath, Tag, Variables1, StylePaths) end,
-                1000 * 60 * 60 * 5 % 5 hours
-            ),
-            Files
-    end.
-
-thumbnail(ComponentPath) ->
-    case diversity_json(ComponentPath, <<"*">>) of
-        undefined ->
-            resource_not_found;
-        {DiversityData} ->
-            ThumbnailPath = proplists:get_value(<<"thumbnail">>, DiversityData, undefined),
-            file(ComponentPath, <<"*">>, ThumbnailPath)
-    end.
-
-%% @doc Retrive al
-get_css(ComponentPath, Tag, Variables, Paths) ->
-    %% Retrive all files(CSS and SCSS).
-    %% Compile all SCSS-files to CSS and then concatenate all of them
-    GetFile = fun (Path) ->
-        %% Retrive the temporary checked out file from the repository
-        File = file(ComponentPath, Tag, Path),
-        case filename:extension(Path) of
-            <<".scss">> ->
-                sass_compile(ComponentPath, Tag, Path, File, Variables);
-            <<".css">> ->
-                File
-        end
-    end,
-    iolist_to_binary(lists:map(GetFile, Paths)).
-
-dir(ComponentPath) ->
-    dir(ComponentPath, <<>>).
-
-dir(ComponentPath, Stage) ->
-    ComponentsDir = ds_api:components_dir(),
-    ComponentDir = filename:join([ComponentsDir, Stage, ComponentPath]),
-    <<ComponentDir/binary, ".git">>.
-
-exists(ComponentPath) ->
-    filelib:is_dir(dir(ComponentPath)).
-
-exists(ComponentPath, Stage) ->
-    filelib:is_dir(dir(ComponentPath, Stage)).
 
 %% @doc Compile a sass-file with given variables
-sass_compile(ComponentPath, Tag, Path, File, Variables) ->
+%sass_compile(Component, Tag, Input, Output, Variables) ->
+%    %% Construct the SASS-variables
+%
+%    ok = filelib:ensure_dir(Output),
+%    {ok, File} = file:open(Output, [append]),
+%    ok = file:write(Output, BinaryVars>>),
+%    {ok, SCSS} = file:read_file(Input)
+%
+%    %% Compile it
+%    PrivDir = unicode:characters_to_binary(code:priv_dir(ds_api)),
+%    SassC = filename:join(PrivDir, <<"sassc">>),
+%    Command = <<SassC/binary, " -t compressed ", Output/binary>>,
+%    Port = erlang:open_port({spawn, Command}, [exit_status, binary, stderr_to_stdout]),
+%    Result = wait_for_response(Port, <<>>),
+%
+%    %% Cleanup
+%    file:delete(TmpPath),
+%
+%    Result.
 
-    %% Construct the SASS-variables
-    VarToBinary = fun ({Variable, Value}, BinAcc) ->
-                      BinVar = <<"$", Variable/binary, ": ", Value/binary, "; ">>,
-                      <<BinAcc/binary, BinVar/binary>>
-                  end,
-    BinaryVars = lists:foldl(VarToBinary, <<>>, Variables),
+%% @doc Expand an incoming tag into the latest matching version
+%% Supported formats are:
+%% *     - Latest version
+%% X     - Latest minor in given major
+%% X.Y   - Latest patch in given major and minor
+%% X.Y.Z - Given version if it is in the given Tags
+%%
+%% all cases will throw an error if no version can be found
+expand_tag_to_version(Component, Tag) ->
+    Version = case tag_to_version(Tag) of
+                  {ok, SemVer}    -> SemVer;
+                  {error, badarg} -> {'*', '*', '*'}
+              end,
+    Versions = versions(Component),
+    expand_version(Version, Versions).
 
-    %% Create a temporary sass file
-    TmpName0 = {ComponentPath, Tag, Path, Variables},
-    TmpName1 = integer_to_binary(erlang:phash2(TmpName0)),
-    TmpPath = filename:join(<<"/tmp/divapi/">>, TmpName1),
-    ok = filelib:ensure_dir(TmpPath),
-    ok = file:write_file(TmpPath, <<BinaryVars/binary, (iolist_to_binary(File))/binary>>),
+expand_version({'*', '*', '*'}, Versions) ->
+    find_latest_version(Versions);
+expand_version({Major, '*', '*'}, Versions) ->
+    find_latest_minor(Major, Versions);
+expand_version({Major, Minor, '*'}, Versions) ->
+    find_latest_patch(Major, Minor, Versions);
+expand_version(Version, Versions) ->
+    case lists:member(Version, Versions) of
+        %% If it exists, then it's the tag we are looking for
+        true  -> Version;
+        %% Otherwise default to the latest
+        false -> expand_version({'*', '*', '*'}, Versions)
+    end.
 
-    %% Compile it
-    PrivDir = unicode:characters_to_binary(code:priv_dir(divapi)),
-    SassC = filename:join(PrivDir, <<"sassc">>),
-    Command = <<SassC/binary, " -t compressed ", TmpPath/binary>>,
-    Port = erlang:open_port({spawn, Command}, [exit_status, binary, stderr_to_stdout]),
-    Result = wait_for_response(Port, <<>>),
+%% @doc Retrive the latest version according to the given comparsion function
+find_latest_version(Versions) ->
+    lists:last(Versions).
 
-    %% Cleanup
-    file:delete(TmpPath),
+find_latest_minor(MajorA, Versions0) ->
+    Versions1 = [Version || {MajorB, _, _} = Version <- Versions0, MajorA =:= MajorB],
+    lists:last(Versions1).
 
-    Result.
+find_latest_patch(MajorA, MinorA, Versions0) ->
+    Versions1 = [Version || {MajorB, MinorB, _} = Version <- Versions0,
+                            MajorA =:= MajorB, MinorA =:= MinorB],
+    lists:last(Versions1).
 
-wait_for_response(Port, File) ->
-    receive
-        {Port, {data, Chunk}} ->
-            wait_for_response(Port, <<File/binary, Chunk/binary>>);
-        {_ , {exit_status, 0}} ->
-            File;
-        {_, {exit_status, _}} ->
-            %% Either not a git repo or operation failed. No need to close port it' already done.
-            error
+%% @doc Version to binary
+%% May throw error:badarg.
+version_to_tag({Major, Minor, Patch}) when Major >= 0, Minor >= 0, Patch >= 0 ->
+    <<(integer_to_binary(Major))/binary, $.,
+      (integer_to_binary(Minor))/binary, $.,
+      (integer_to_binary(Patch))/binary>>.
+
+%% @doc Binary or list to version tuple
+tag_to_version(<<$*>>) ->
+    {'*', '*', '*'};
+tag_to_version(Tag) when is_binary(Tag) ->
+    try
+        case binary:split(Tag, <<$.>>, [global]) of
+            [Major0, Minor0, Patch0] ->
+                case {binary_to_integer(Major0),
+                      binary_to_integer(Minor0),
+                      binary_to_integer(Patch0)} of
+                    {Major1, Minor1, Patch1} = Version
+                      when Major1 >= 0, Minor1 >= 0, Patch1 >= 0 ->
+                        {ok, Version};
+                    _ ->
+                        {error, badarg}
+                end;
+            [Major0, Minor0] ->
+                case {binary_to_integer(Major0), binary_to_integer(Minor0)} of
+                    {Major1, Minor1} when Major1 >= 0, Minor1 >= 0 ->
+                        {ok, {Major1, Minor1, '*'}};
+                    _ ->
+                        {error, badarg}
+                end;
+            [Major0] ->
+                {ok, {binary_to_integer(Major0), '*', '*'}}
+        end
+    catch
+        error:_ -> {error, badarg}
     end.
 
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").
 
-%% Testdata
--define(REPO, <<"test-component">>).
--define(TAG,  <<"0.0.1">>).
--define(TEST_CSS, <<".body { font-family: test; }">>).
--define(TEST_SCSS, <<"$test-color: #FFFFFF\n.test { background: $test-color; }">>).
--define(DIVERSITY_JSON, {[{style, [<<"test.css">>, <<"test.scss">>]}]}).
-
-serve_css_test() ->
-    {setup,
-     fun() ->
-        %% Mock the git_utils module
-        meck:new(ds_api_git),
-        meck:expect(
-            diversity_json,
-            fun (?REPO, ?TAG) -> jiffy:encode(?DIVERSITY_JSON) end
-        ),
-        meck:expect(
-            ds_api_git, get_file,
-            fun (?REPO, ?TAG, "test.css")  -> ?TEST_CSS;
-                (?REPO, ?TAG, "test.scss") -> ?TEST_SCSS
-            end
-        ),
-        application:start(ds_api)
-     end,
-     fun(_) ->
-         application:stop(ds_api),
-         meck:unload(ds_api_git)
-     end,
-     [
-      {"Serve CSS files",
-       fun () ->
-           Variables = [{<<"test-color">>, <<"#000000">>}],
-           Expected =
-               <<
-                 %% The css should just be concatenated
-                 ?TEST_CSS/binary,
-
-                 %% The scss should be compiled with the given
-                 %% variables and then concatenated
-                 ".test { background: #000000; }"
-               >>,
-          ?assertEqual({css, Expected}, css(?REPO, ?TAG, Variables))
-       end}
-     ]
-    }.
+expand_tag_test_() ->
+    L = lists:seq(0,3),
+    Tags = [<<"invalid">> | [version_to_binary({X,Y,Z}) || X <- L, Y <- L, Z <- L]],
+    [?_assertEqual(<<"3.3.3">>, expand_tag(<<"*">>, Tags)),
+     ?_assertEqual(<<"1.3.3">>, expand_tag(<<"1">>, Tags)),
+     ?_assertEqual(<<"2.3.3">>, expand_tag(<<"2.3">>, Tags)),
+     ?_assertEqual(<<"1.2.3">>, expand_tag(<<"1.2.3">>, Tags)),
+     ?_assertError(_,           expand_tag(<<"4">>, Tags)),
+     ?_assertError(_,           expand_tag(<<"3.4">>, Tags)),
+     ?_assertError(_,           expand_tag(<<"*">>, [<<"no_valid_tags">>]))].
 
 -endif.

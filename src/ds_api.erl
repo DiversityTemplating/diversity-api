@@ -1,9 +1,6 @@
 -module(ds_api).
 
--define(DEFAULT_COMPONENTS_DIR, "/tmp/ds_api/components").
-
 -export([accepting/0]).
--export([is_production/0]).
 -export([components_dir/0]).
 -export([config/1]).
 -export([config/2]).
@@ -11,13 +8,11 @@
 accepting() ->
     config(accepting, false).
 
-is_production() ->
-    config(stage) =/= undefined.
-
 components_dir() ->
-    case config(components_dir, ?DEFAULT_COMPONENTS_DIR) of
+    case config(components_dir) of
         Dir when is_binary(Dir) -> Dir;
-        Dir when is_list(Dir)   -> unicode:characters_to_binary(Dir)
+        Dir when is_list(Dir)   -> unicode:characters_to_binary(Dir);
+        undefined               -> "./components"
     end.
 
 config(Key) ->

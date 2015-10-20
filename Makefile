@@ -3,8 +3,9 @@ PROJECT_DESCRIPTION = A CDN for Diversity components
 PROJECT_VERSION = 0.5.0
 PROJECT_REGISTERED = ds_api_cache
 
-DEPS = cowboy jiffy raven
-dep_raven = git https://github.com/soundrop/raven-erlang.git master
+DEPS = cowboy jiffy gen_leader raven
+dep_gen_leader = git https://github.com/garret-smith/gen_leader_revival.git master
+dep_raven      = git https://github.com/soundrop/raven-erlang.git master
 
 TEST_DEPS = meck
 dep_meck = git https://github.com/eproxus/meck.git master
@@ -38,8 +39,5 @@ priv/sassc: deps/sassc priv
 
 priv:
 	@mkdir -p priv
-
-erlang.mk: 
-	@curl https://raw.githubusercontent.com/ninenines/erlang.mk/master/erlang.mk > $@
 
 include erlang.mk
