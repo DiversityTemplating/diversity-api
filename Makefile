@@ -1,9 +1,9 @@
 PROJECT = ds_api
 PROJECT_DESCRIPTION = A CDN for Diversity components
 PROJECT_VERSION = 0.5.0
-PROJECT_REGISTERED = ds_api_cache
+PROJECT_REGISTERED = ds_api_cache ds_api_component_mgr
 
-DEPS = cowboy jiffy gen_leader raven
+DEPS = cowboy jiffy gen_leader lager raven
 dep_gen_leader = git https://github.com/garret-smith/gen_leader_revival.git master
 dep_raven      = git https://github.com/soundrop/raven-erlang.git master
 
@@ -18,6 +18,8 @@ ERLC_OPTS += $(ERLC_COMPILE_OPTS)
 TEST_ERLC_OPTS += $(ERLC_COMPILE_OPTS)
 
 CURRENT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
+
+SHELL_OPTS = -config dev.config
 
 all:: priv/sassc
 

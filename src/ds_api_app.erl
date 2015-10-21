@@ -30,9 +30,9 @@ start(_Type, _Args) ->
         {"/components/:component/:tag/files/:file",   Constraints2, ds_api_component_handler, [file]}, 
         {"/components/:component/:tag/script.min.js", Constraints1, ds_api_component_handler, [javascript]},
         {"/components/:component/:tag/css",           Constraints1, ds_api_component_handler, [css]},
-        {"/components/:component/:tag/thumbnail",     Constraints1, ds_api_component_handler, [thumbnail]},
-        {"/js",                                       [],           ds_api_js_handler,        []},
-        {"/css",                                      [],           ds_api_css_handler,       []}
+        {"/components/:component/:tag/thumbnail",     Constraints1, ds_api_component_handler, [thumbnail]}
+%        {"/js",                                       [],           ds_api_js_handler,        []},
+%        {"/css",                                      [],           ds_api_css_handler,       []}
     ],
     HostMatch = ds_api:config(host_match, '_'),
     Dispatch = cowboy_router:compile([{HostMatch, Routes}]),
