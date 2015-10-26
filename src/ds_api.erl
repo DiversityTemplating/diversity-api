@@ -4,6 +4,7 @@
 -export([components_dir/0]).
 -export([config/1]).
 -export([config/2]).
+-export([set_config/2]).
 
 accepting() ->
     config(accepting, false).
@@ -20,3 +21,6 @@ config(Key) ->
 
 config(Key, Default) ->
     application:get_env(ds_api, Key, Default).
+
+set_config(Key, Value) ->
+    application:set_env(ds_api, Key, Value).

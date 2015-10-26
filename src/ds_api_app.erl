@@ -8,31 +8,26 @@
 -define(DEFAULT_LISTENER_COUNT, 100).
 
 start(_Type, _Args) ->
-    %% Create components directory if missing
-    ok = filelib:ensure_dir(ds_api:components_dir()),
+    %% Expand components directory to an absolute path and create it
+    ComponentsDir0 = ds_api:components_dir(),
+    ComponentsDir1 = filename:absname(ComponentsDir0),
+    ok = ds_api:set_config(components_dir, ComponentsDir1),
+    ok = filelib:ensure_dir(ComponentsDir1),
 
     %% Setup cowboy routes
     Constraints0 = [{component, nonempty}],
-    Constraints1 = [{tag, nonempty} | Constraints0],
-    Constraints2 = [{file, nonempty} | Constraints1],
+    VersionConstraintFun = fun (Value) ->
+                                   case ds_api_version:to_version(Value) of
+                                       {ok, Version}   -> {true, Version};
+                                       {error, badarg} -> false
+                                   end
+                           end,
+    Constraints1 = [{version, function, VersionConstraintFun} | Constraints0],
 
-    %% TODO:
-    %% Remove settings/settingsForm (better to use diversity.json directly
-    %% Let script.min.js be an ordinary file
-    %% Is thumbnail needed?
     Routes = [
-        {"/components",                                             ds_api_handler,           [list]},
-        {"/components/:component",                    Constraints0, ds_api_handler,           [component]},
-        {"/components/:component/update",             Constraints0, ds_api_handler,           [update]},
-        {"/components/:component/:tag",               Constraints1, ds_api_component_handler, [diversityJSON]},
-        {"/components/:component/:tag/settings",      Constraints1, ds_api_component_handler, [settings]},
-        {"/components/:component/:tag/settingsForm",  Constraints1, ds_api_component_handler, [settingsForm]},
-        {"/components/:component/:tag/files/:file",   Constraints2, ds_api_component_handler, [file]}, 
-        {"/components/:component/:tag/script.min.js", Constraints1, ds_api_component_handler, [javascript]},
-        {"/components/:component/:tag/css",           Constraints1, ds_api_component_handler, [css]},
-        {"/components/:component/:tag/thumbnail",     Constraints1, ds_api_component_handler, [thumbnail]}
-%        {"/js",                                       [],           ds_api_js_handler,        []},
-%        {"/css",                                      [],           ds_api_css_handler,       []}
+        {"/components",                                         ds_api_components_handler, []},
+        {"/components/:component",                Constraints0, ds_api_component_handler, []},
+        {"/components/:component/:version/[...]", Constraints1, ds_api_version_handler, []}
     ],
     HostMatch = ds_api:config(host_match, '_'),
     Dispatch = cowboy_router:compile([{HostMatch, Routes}]),

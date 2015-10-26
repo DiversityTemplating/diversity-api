@@ -7,10 +7,22 @@
 -export([versions/1]).
 -export([exists/1]).
 -export([exists/2]).
--export([add/2]).
--export([update/1]).
+-export([published/2]).
+-export([add_component/2]).
+-export([delete_component/1]).
+-export([add_version/2]).
+-export([delete_version/2]).
+-export([unpublished_versions/0]).
 -export([publish/1]).
--export([staged/0]).
+-export([publish/2]).
+
+-export([component_dir/1]).
+-export([versions_dir/1]).
+-export([git_dir/1]).
+-export([version_dir/2]).
+-export([files_dir/2]).
+-export([remote_dir/2]).
+-export([file_path/3]).
 
 -export([init/1]).
 -export([handle_call/3]).
@@ -21,12 +33,11 @@
 
 -define(TAB, ?MODULE).
 
--type version() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
--type versions() :: ordsets:ordset(version()).
-
--record(state, {
-          staged = #{} :: #{binary() => versions()}
-         }).
+%% The ETS-table keeps all information about all currently loaded components and versions.
+%% There are three types of entries:
+%% {components, Components :: ordsets:ordset(Component :: binary())
+%% {{component, Component :: binary()}, , Versions :: ordsets:ordset(Version :: ds_api_version:version())}
+%% {{version, Component :: binary(), Version :: ds_api_version:version()}, Published :: boolean()}
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -39,84 +50,85 @@ versions(Component) ->
     Key = {component, Component},
     case ets:lookup(?TAB, Key) of
         [{Key, Versions}] -> Versions;
-        _Error            -> undefined
+        _Undefined        -> undefined
     end.
 
 exists(Component) ->
-    versions(Component) =/= undefined.
+    ets:member(?TAB, {component, Component}).
 
 exists(Component, Version) ->
-    case versions(Component) of
-        undefined -> false;
-        Versions  -> lists:member(Version, Versions)
+    ets:member(?TAB, {version, Component, Version}).
+
+published(Component, Version) ->
+    case ets:lookup(?TAB, {version, Component, Version}) of
+        [{_, Published}] -> Published;
+        _Undefined       -> undefined
     end.
 
-add(Component, RepoURL) ->
+add_component(Component, RepoURL) ->
     Timeout = 5 * 60 * 1000,
-    gen_server:call(?MODULE, {add, Component, RepoURL}, Timeout).
+    gen_server:call(?MODULE, {add_component, Component, RepoURL}, Timeout).
 
-update(Component) ->
+delete_component(Component) ->
     Timeout = 5 * 60 * 1000,
-    gen_server:call(?MODULE, {update, Component}, Timeout).
+    gen_server:call(?MODULE, {delete_component, Component}, Timeout).
 
-publish(Component) ->
-    gen_server:call(?MODULE, {publish, Component}).
+add_version(Component, Version) ->
+    Timeout = 5 * 60 * 1000,
+    gen_server:call(?MODULE, {add_version, Component, Version}, Timeout).
 
-staged() ->
-    gen_server:call(?MODULE, staged).
+delete_version(Component, Version) ->
+    Timeout = 5 * 60 * 1000,
+    gen_server:call(?MODULE, {delete_version, Component, Version}, Timeout).
 
+unpublished_versions() ->
+    gen_server:call(?MODULE, unpublished_versions).
+
+publish(ComponentVersions) when is_map(ComponentVersions) ->
+    gen_server:call(?MODULE, {publish, ComponentVersions}).
+
+publish(Component, Version) ->
+    publish(maps:put(Component, [Version], #{})).
+
+component_dir(Component) ->
+    ComponentsDir = ds_api:components_dir(),
+    filename:join(ComponentsDir, Component).
+
+versions_dir(Component) ->
+    filename:join(component_dir(Component), versions).
+
+git_dir(Component) ->
+    filename:join(component_dir(Component), git).
+
+version_dir(Component, Version) ->
+    filename:join(versions_dir(Component), ds_api_version:to_binary(Version)).
+
+files_dir(Component, Version) ->
+    filename:join(version_dir(Component, Version), files).
+
+remote_dir(Component, Version) ->
+    filename:join(version_dir(Component, Version), remote).
+
+file_path(Component, Version, File) ->
+    filename:join(files_dir(Component, Version), File).
 
 init(_Config) ->
     ?TAB = ets:new(?TAB, [{read_concurrency, true}, named_table]),
     true = ets:insert(?TAB, {components, ordsets:new()}),
-    {ok, #state{}}.
+    {ok, no_state}.
 
-handle_call({add, Component, RepoURL}, _From, #state{staged = Staged0} = State) ->
-    case exists(Component) of
-        true ->
-            {reply, {error, exists}, State};
-        false ->
-            case maps:is_key(Component, Staged0) of
-                true ->
-                    {reply, {error, staged}, State};
-                false ->
-                    case add_component(Component, RepoURL) of
-                        {ok, Changes} ->
-                            Staged1 = maps:put(Component, Changes, Staged0),
-                            {reply, ok, State#state{staged = Staged1}};
-                        Error ->
-                            {reply, Error, State}
-                    end
-            end
-    end;
-handle_call({update, Component}, _From, #state{staged = Staged0} = State) ->
-    case not exists(Component) of
-        true ->
-            {reply, {error, unknown}, State};
-        false ->
-            case maps:is_key(Component, Staged0) of
-                true ->
-                    {reply, {error, staged}, State};
-                false ->
-                    case update_component(Component) of
-                        {ok, Changes} ->
-                            Stage1 = maps:put(Component, Changes, Staged0),
-                            {reply, ok, State#state{staged = Stage1}};
-                        Error ->
-                            {reply, Error, State}
-                    end
-            end
-    end;
-handle_call({publish, Component}, _From, #state{staged = Staged0} = State) ->
-    case maps:is_key(Component, Staged0) of
-        true ->
-            Staged1 = publish_component(Component, Staged0),
-            {reply, ok, State#state{staged = Staged1}};
-        false ->
-            {error, not_staged}
-    end;
-handle_call(staged, _From, #state{staged = Staged} = State) ->
-{reply, Staged, State}.
+handle_call({add_component, Component, RepoURL}, _From, State) ->
+    {reply, do_add_component(Component, RepoURL), State};
+handle_call({delete_component, Component}, _From, State) ->
+    {reply, do_delete_component(Component), State};
+handle_call({add_version, Component, Version}, _From, State) ->
+    {reply, do_add_version(Component, Version), State};
+handle_call({delete_version, Component, Version}, _From, State) ->
+    {reply, do_delete_version(Component, Version), State};
+handle_call({publish, ComponentVersions}, _From, State) ->
+    {reply, do_publish_versions(ComponentVersions), State};
+handle_call(unpublished_versions, _From, State) ->
+    {reply, get_unpublished_versions(), State}.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -130,104 +142,152 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-add_component(Component, RepoURL) ->
-    ComponentDir = ds_api_component:dir(Component),
-    VersionsDir = ds_api_component:versions_dir(ComponentDir),
-    case filelib:ensure_dir(ComponentDir) of
-        ok ->
-            case filelib:ensure_dir(VersionsDir) of
+do_add_component(Component, RepoURL) ->
+    case exists(Component) of
+        true ->
+            {error, component_exists};
+        false ->
+            case do_create_component(Component, RepoURL) of
                 ok ->
-                    case ds_api_git:clone(RepoURL, ComponentDir) of
-                        ok    -> update_component(Component);
-                        Error -> Error
-                    end;
+                    Components0 = components(),
+                    Components1 = ordsets:add_element(Component, Components0),
+                    ComponentsEntry = {components, Components1},
+                    ComponentEntry = {{component, Component}, ordsets:new()},
+                    true = ets:insert(?TAB, [ComponentsEntry, ComponentEntry]),
+                    ok;
                 Error ->
+                    ds_api_util:delete_dir(component_dir(Component)),
                     Error
-            end;
-        Error ->
-            Error
+            end
     end.
 
-update_component(Component) ->
-    Versions = versions(Component),
-    ComponentDir = ds_api_component:dir(Component),
-    GitDir = ds_api_component:git_dir(ComponentDir),
-    case ds_api_git:tags(GitDir) of
-        {ok, Tags} ->
-            GitVersions0 = lists:filtermap(
-                             fun (Tag) ->
-                                     case ds_api_version:to_version(Tag) of
-                                         {ok, Version} -> {true, Version};
-                                         {error, badarg} -> false
-                                     end
-                             end,
-                             Tags
-                            ),
-            GitVersions1 = ordsets:from_list(GitVersions0),
-            AddedVersions = ordsets:subtract(GitVersions1, Versions),
-            RemovedVersions = ordsets:substract(Versions, GitVersions1),
-            case add_versions(Component, AddedVersions) of
-                ok    -> {ok, {AddedVersions, RemovedVersions}};
-                Error -> Error
-            end;
-        Error ->
-            Error
-    end.
-
-add_versions(_ComponentDir, []) ->
-    ok;
-add_versions(Component, [Version | Versions]) ->
-    case add_version(Component, Version) of
-        ok    -> add_versions(Component, Versions);
+do_create_component(Component, RepoURL) ->
+    GitDir = git_dir(Component),
+    VersionsDir = versions_dir(Component),
+    case filelib:ensure_dir(VersionsDir) of
+        ok    -> ds_api_git:clone(RepoURL, GitDir);
         Error -> Error
     end.
 
-add_version(Component, Version) ->
-    ComponentDir = ds_api_component:dir(Component),
-    GitDir = ds_api_component:git_dir(ComponentDir),
-    VersionsDir = ds_api_component:versions_dir(ComponentDir),
-    VersionDir = ds_api_component:version_dir(VersionsDir, Version),
-    Tag = ds_api_version:to_binary(Version),
-    case filelib:ensure_dir(VersionDir) of
-        ok ->
-            FilesDir = ds_api_component:files_dir(VersionDir),
-            case ds_api_git:copy_tag(GitDir, Tag, FilesDir) of
-                ok    -> ds_api_preprocess:run(Component, Version, VersionDir);
-                Error -> Error
+do_delete_component(Component) ->
+    %% Remove component from the components entry
+    Components0 = components(),
+    Components1 = ordsets:del_element(Component, Components0),
+    true = ets:insert(?TAB, {components, Components1}),
+
+    %% Remove the component entry
+    true = ets:delete(?TAB, {component, Component}),
+
+    %% Remove all version entries
+    true = ets:match_delete(?TAB, {{version, Component, '_'}, '_'}),
+
+    %% Delete the component directory
+    ComponentDir = component_dir(Component),
+    ds_api_util:delete_dir(ComponentDir),
+    ok.
+
+do_add_version(Component, Version) ->
+    case exists(Component, Version) of
+        true ->
+            {error, exists};
+        false ->
+            case do_create_version(Component, Version) of
+                ok ->
+                    %% Create an unpublished entry
+                    VersionEntry = {{version, Component, Version}, false},
+                    true = ets:insert(?TAB, VersionEntry),
+                    ok;
+                Error ->
+                    ds_api_util:delete_dir(version_dir(Component, Version)),
+                    Error
+            end
+    end.
+
+do_create_version(Component, Version) ->
+    VersionBin = ds_api_version:to_binary(Version),
+    VersionDir = version_dir(Component, Version),
+    GitDir = git_dir(Component),
+    FilesDir = files_dir(Component, Version),
+    case get_git_versions(GitDir) of
+        {ok, Versions} ->
+            case ordsets:is_element(Version, Versions) of
+                true ->
+                    case ds_api_git:copy_tag(GitDir, VersionBin, FilesDir) of
+                        ok    -> ds_api_preprocess:run(Component, Version, VersionDir);
+                        Error -> Error
+                    end;
+                false ->
+                    {error, unknown_version}
             end;
         Error ->
             Error
     end.
 
-publish_component(Component, Staged) ->
-    %% Create new components
-    Components0 = components(),
-    Components1 = ordsets:add_element(Component, Components0),
+do_delete_version(Component, Version) ->
+    VersionDir = version_dir(Component, Version),
+    case versions(Component) of
+        undefined ->
+            ok;
+        Versions0 ->
+            Versions1 = ordsets:del_element(Version, Versions0),
+            ets:insert(?TAB, {{component, Component}, Versions1})
+    end,
+    ets:delete(?TAB, {version, Component, Version}),
+    ds_api_util:delete_dir(VersionDir),
+    ok.
 
-    %% Update the components versions
+do_publish_versions(ComponentVersions) ->
+    case check_all_unpublished(ComponentVersions) of
+        ok ->
+            UpdatedEntries = maps:fold(fun get_version_table_updates/3, [], ComponentVersions),
+            true = ets:insert(?TAB, UpdatedEntries),
+            ok;
+        Error ->
+            Error
+    end.
+
+get_version_table_updates(Component, NewVersions, Acc) ->
     Versions0 = versions(Component),
-    {NewVersions, RemovedVersions} = maps:get(Component, Staged),
-    Versions1 = ordsets:union(Versions0, NewVersions),
-    Versions2 = ordsets:subtract(Versions1, RemovedVersions),
+    Versions1 = ordsets:union(Versions0, ordsets:from_list(NewVersions)),
+    ComponentEntry = {{component, Component}, Versions1},
+    PublishedVersionEntries = [{{version, Component, Version}, true} || Version <- NewVersions],
+    [ComponentEntry | PublishedVersionEntries] ++ Acc.
 
-    %% Execute changes
-    Entries = [{components, Components1}, {component, Component, Versions2}],
-    ok = ets:insert(?TAB, Entries),
+check_all_unpublished(ComponentVersions) when is_map(ComponentVersions) ->
+    check_all_unpublished(maps:to_list(ComponentVersions));
+check_all_unpublished([]) ->
+    ok;
+check_all_unpublished([{Component, Versions} | ComponentVersions]) ->
+    case check_unpublished(Component, Versions) of
+        ok    -> check_all_unpublished(ComponentVersions);
+        Error -> Error
+    end.
 
-    %% Remove unneeded version
-    ComponentsDir = ds_api_component:dir(Component),
-    VersionsDir = ds_api_component:versions_dir(ComponentsDir),
-    lists:foreach(
-      fun (Version) -> delete_version_dir(VersionsDir, Version) end,
-      RemovedVersions
-     ).
+check_unpublished(_Component, []) ->
+    ok;
+check_unpublished(Component, [Version | Versions]) ->
+    case published(Component, Version) of
+        false    -> check_unpublished(Component, Versions);
+        _Invalid -> {error, {not_added, Component, Version}}
+    end.
 
-delete_version_dir(VersionsDir, Version) ->
-    VersionDir = ds_api_component:version_dir(VersionsDir, Version),
-    try
-        [] = os:cmd("rm -r " ++ unicode:characters_to_list(VersionDir))
-    catch
-        error:badmatch ->
-            %% TODO: Log to sentry
-            ok
+get_unpublished_versions() ->
+    UnpublishedVersions = ets:match(?TAB, {{version, '$1', '$2'}, false}),
+    ordsets:from_list([{Component, Version} || [Component, Version] <- UnpublishedVersions]).
+
+get_git_versions(GitDir) ->
+    case ds_api_git:tags(GitDir) of
+        {ok, Tags} ->
+            GitVersions = lists:filtermap(
+                            fun (Tag) ->
+                                    case ds_api_version:to_version(Tag) of
+                                        {ok, V}         -> {true, V};
+                                        {error, badarg} -> false
+                                    end
+                            end,
+                            Tags
+                           ),
+            ordsets:from_list(GitVersions);
+        _Error ->
+            {error, could_not_fetch_tags}
     end.

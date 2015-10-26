@@ -4,6 +4,7 @@
 -export([git_dir/1]).
 -export([versions_dir/1]).
 -export([version_dir/2]).
+-export([remote_dir/1]).
 -export([files_dir/1]).
 -export([file_path/3]).
 -export([list/0]).
@@ -27,6 +28,9 @@ versions_dir(ComponentDir) ->
 version_dir(VersionDir, Version) ->
     BinVersion = ds_api_version:to_binary(Version),
     filename:join(VersionDir, BinVersion).
+
+remote_dir(VersionDir) ->
+    filename:join(VersionDir, remote).
 
 files_dir(VersionDir) ->
     filename:join(VersionDir, files).

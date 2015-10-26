@@ -7,12 +7,21 @@
 minify(JSFile) ->
     RootName = filename:rootname(JSFile, <<".js">>),
     MinifiedFile = <<RootName/binary, ".min.js">>,
+    lager:debug(
+      "MINIFYING JS~n"
+      "INPUT: ~p~n"
+      "OUTPUT: ~p~n",
+      [JSFile, MinifiedFile]
+     ),
     minify(JSFile, MinifiedFile).
 
 minify(Input, Output) ->
     Command = <<"uglifyjs --screw-ie8 -c -m -o ", Output/binary, " ", Input/binary>>,
     WorkingDir = filename:dirname(Input),
-    ds_api_util:cmd(Command, WorkingDir).
+    case ds_api_util:cmd(Command, WorkingDir) of
+        {ok, _Reply} -> {ok, Output};
+        Error        -> Error
+    end.
 
 %%% @doc Minifies all javascripts for a given component
 %minify(ComponentName) ->

@@ -1,127 +1,71 @@
 -module(ds_api_component_handler).
 
 -export([init/3]).
--export([rest_init/2]).
 -export([allowed_methods/2]).
 -export([resource_exists/2]).
--export([content_types_provided/2]).
--export([serve_css/2]).
--export([serve_json/2]).
--export([serve_file/2]).
+-export([is_authorized/2]).
+-export([is_conflict/2]).
 -export([generate_etag/2]).
+-export([content_types_provided/2]).
+-export([content_types_accepted/2]).
+-export([delete_resource/2]).
+-export([to_json/2]).
+-export([add_component/2]).
 
--record(state, {
-          action,
-          component,
-          tag,
-          data
-         }).
-
-init(_Type, Req0, [Action]) ->
+init(_Type, Req0, []) ->
     {Component, Req1} = cowboy_req:binding(component, Req0),
-    {Tag0, Req2} = cowboy_req:binding(tag, Req1),
-    Tag1 = ds_api_component:expand_tag(Component, Tag0),
-    State = #state{action = Action, component = Component, tag = Tag1},
-    {upgrade, protocol, cowboy_rest, Req2, State}.
+    {upgrade, protocol, cowboy_rest, Req1, Component}.
 
-rest_init(Req, #state{tag = undefined} = State) ->
-    {ok, Req, State};
-rest_init(Req0, State) ->
-    #state{component = Component, tag = Tag, action = Action} = State,
-    {Data, Req1} = case Action of
-                       diversityJSON ->
-                           {<<"files/diversity.json">>, Req0};
-                       javascript ->
-                           {<<"script.min.js">>, Req0};
-                       css ->
-                           Diversity = ds_api_component:diversityJSON(Component, Tag),
-                           {Variables0, Req} = cowboy_req:qs_vals(Req0),
-                           ToBinary = fun ({Variable, Value}, Acc) ->
-                                              BinVar = <<$$, Variable/binary, $:, Value/binary, $;>>,
-                                              <<Acc/binary, BinVar/binary>>
-                                      end,
-                           Variables1 = lists:foldl(ToBinary, <<>>, Variables0),
+allowed_methods(Req, Component) ->
+    Methods = [<<"GET">>, <<"HEAD">>, <<"PUT">>, <<"DELETE">>, <<"OPTIONS">>],
+    {Methods, Req, Component}.
 
-                           Hash = crypto:hash(sha1, Variables1),
-                           CSSStyles = case maps:get(<<"styles">>, Diversity) of
-                                           Style when is_binary(Style) -> [Style];
-                                           Styles when is_list(Styles) -> Styles;
-                                           undefined                   -> undefined
-                                       end,
-                           Hash = case CSSStyles of
-                                      undefined -> undefined;
-                                      _         -> crypto:hash(sha1, Variables1)
-                                  end,
-                           CSSData = #{styles => CSSStyles,
-                                       variables => Variables1,
-                                       hash => Hash},
-                           {CSSData, Req};
-                       file ->
-                           {File, Req} = cowboy_req:binding(file, Req0),
-                           {filename:join(files, File), Req};
-                       _ when Action =:= settings;
-                              Action =:= settingsForm;
-                              Action =:= thumbnail ->
-                           {ds_api_component:Action(Component, Tag), Req0}
-                   end,
-    State = #state{
-               action = Action,
-               component = Component,
-               data = Data
-              },
-    {ok, Req1, State}.
+resource_exists(Req, Component) ->
+    {ds_api_component_mgr:exists(Component), Req, Component}.
 
-allowed_methods(Req, State) ->
-    {[<<"GET">>, <<"OPTIONS">>], Req, State}.
+generate_etag(Req, Component) ->
+    {{strong, <<"components/", Component/binary, "/versions">>}, Req, Component}.
 
-resource_exists(Req, #state{component = Component, tag = Tag, data = Path} = State)
-  when is_binary(Path) ->
-    AbsPath = filename:join(ds_api_component:path(Component, Tag), Path),
-    {filelib:is_file(AbsPath), Req, State#state{data = AbsPath}};
-resource_exists(Req, #state{action = css, data = #{styles := Styles}} = State) ->
-    {Styles =/= undefined andalso Styles =/= [], Req, State};
-resource_exists(Req, #state{data = JSON} = State) when is_map(JSON) ->
-    {true, Req, State};
-resource_exists(Req, #state{data = undefined} = State) ->
-    {false, Req, State}.
+is_authorized(Req0, Component) ->
+    case cowboy_req:method(Req0) of
+        {Method, Req1} when Method =:= <<"PUT">>;
+                            Method =:= <<"DELETE">> ->
+            % TODO: API-KEY
+            {true, Req1, Component};
+        _ ->
+            {true, Req0, Component}
+    end.
 
-content_types_provided(Req, #state{action = css} = State) ->
-    {[{{<<"text">>, <<"css">>, []}, serve_css}], Req, State};
-content_types_provided(Req, #state{data = JSON} = State) when is_map(JSON) ->
-    {[{{<<"application">>, <<"json">>, []}, serve_json}], Req, State};
-content_types_provided(Req, #state{data = File} = State) when is_binary(File) ->
-    {[{cow_mimetypes:web(File), serve_file}], Req, State}.
+is_conflict(Req, Component) ->
+    {ds_api_component_mgr:exists(Component), Req, Component}.
 
-generate_etag(Req, #state{component = Component, tag = Tag, data = File} = State)
-  when is_binary(File) ->
-    ETag = <<Component/binary, $_, Tag/binary, $_, File/binary>>,
-    {{strong, ETag}, Req, State};
-generate_etag(Req, #state{action = Action, component = Component, tag = Tag} = State)
-  when Action =:= settings; Action =:= settingsForm ->
-    ETag = <<Component/binary, $_, Tag/binary, $_, (atom_to_binary(Action, utf8))/binary>>,
-    {{strong, ETag}, Req, State};
-generate_etag(Req, #state{action = css, component = Component, tag = Tag, data = #{hash := Hash}} = State) ->
-    ETag = <<Component/binary, $_, Tag/binary, $_, "css", $_, Hash/binary>>,
-    {{strong, ETag}, Req, State}.
+content_types_provided(Req, Component) ->
+    {[{{<<"application">>, <<"json">>, []}, to_json}], Req, Component}.
 
-serve_css(Req, #state{data = CSSFile} = State) when is_binary(CSSFile) ->
-    serve_css(Req, State#state{data = [CSSFile]});
-serve_css(Req, #state{component = Component, tag = Tag, data = CSSData} = State) 
-  when is_map(CSSData) ->
-    {ok, CSSFiles} = ds_api_component:css(Component, Tag, CSSData),
-    serve_files(Req, State#state{data = CSSFiles}).
+content_types_accepted(Req, Component) ->
+    {[{{<<"application">>, <<"x-www-form-urlencoded">>, []}, add_component}], Req, Component}.
 
-serve_json(Req, #state{data = JSON} = State) when is_map(JSON) ->
-    {jiffy:encode(JSON), Req, State}.
+delete_resource(Req, Component) ->
+    case ds_api_component_mgr:delete_component(Component) of
+        ok              -> {true, Req, Component};
+        {error, _Error} -> {false, Req, Component}
+    end.
 
-serve_file(Req, #state{data = File} = State) when is_binary(File) ->
-    {fun (Socket, Transport) -> Transport:sendfile(Socket, File) end, Req, State}.
+to_json(Req, Component) ->
+    Versions0 = ds_api_component_mgr:versions(Component),
+    Versions1 = [ds_api_util:to_binary(Version) || Version <- Versions0],
+    {jiffy:encode(Versions1), Req, Component}.
 
-serve_files(Req, #state{data = Files} = State) when is_list(Files) ->
-    SendFiles = fun (Socket, Transport) ->
-                        lists:foreach(
-                          fun (File) -> Transport:sendfile(Socket, File) end,
-                          Files
-                         )
-                end,
-    {SendFiles, Req, State}.
+add_component(Req0, Component) ->
+    {ok, QS, Req1} = cowboy_req:body_qs(Req0),
+    case proplists:get_value(<<"repo_url">>, QS) of
+        RepoURL when is_binary(RepoURL) ->
+            case ds_api_component_mgr:add_component(Component, RepoURL) of
+                ok ->
+                    {true, Req1, Component};
+                {error, _Error} ->
+                    {false, Req1, Component}
+            end;
+        undefined ->
+            {false, Req1, Component}
+    end.

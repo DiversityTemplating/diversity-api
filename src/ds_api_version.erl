@@ -3,6 +3,7 @@
 -export([to_version/1]).
 -export([to_binary/1]).
 -export([expand/2]).
+-export([is_specific/1]).
 
 expand({'*', '*', '*'}, Versions) ->
     find_latest_version(Versions);
@@ -29,6 +30,9 @@ find_latest_patch(MajorA, MinorA, Versions0) ->
     Versions1 = [Version || {MajorB, MinorB, _} = Version <- Versions0,
                             MajorA =:= MajorB, MinorA =:= MinorB],
     lists:last(Versions1).
+
+is_specific({Major, Minor, Patch}) ->
+    Major =/= '*' andalso Minor =/= '*' andalso Patch =/= '*'.
 
 to_binary({Major, Minor, Patch}) ->
     <<(integer_to_binary(Major))/binary, $.,

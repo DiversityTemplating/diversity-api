@@ -19,8 +19,6 @@ TEST_ERLC_OPTS += $(ERLC_COMPILE_OPTS)
 
 CURRENT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 
-SHELL_OPTS = -config dev.config
-
 all:: priv/sassc
 
 distclean::

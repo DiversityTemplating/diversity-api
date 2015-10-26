@@ -3,12 +3,25 @@
 -export([run/3]).
 
 run(Component, Version, VersionDir) ->
-    FilesDir = ds_api_component:files_dir(VersionDir, Version),
+    lager:debug(
+      "PREPROCESSING COMPONENT~n"
+      "Component: ~p~n"
+      "Version: ~p~n"
+      "Directory: ~p~n",
+      [Component, ds_api_version:to_binary(Version), VersionDir]
+     ),
+
+    FilesDir = ds_api_component:files_dir(VersionDir),
     case get_diversity_json(FilesDir) of
         {ok, Diversity} ->
             case check_diversity_json(Component, Version, Diversity, FilesDir) of
-                ok    -> pre_process_files(Diversity, VersionDir);
-                Error -> Error
+                ok ->
+                    case write_compact_diversity_json(FilesDir, Diversity) of
+                        ok    -> pre_process_files(Diversity, VersionDir);
+                        Error -> Error
+                    end;
+                Error ->
+                    Error
             end;
         Error ->
             Error
@@ -27,6 +40,11 @@ pre_process_files(Diversity, VersionDir) ->
 
 pre_process_css_files(Diversity, VersionDir) ->
     MaybeRemoteCSSFiles = get_diversity_json_files(<<"style">>, Diversity, VersionDir),
+    lager:debug(
+      "PREPROCESSING CSS~n"
+      "FILES: ~p~n",
+      [MaybeRemoteCSSFiles]
+     ),
     case fetch_remote_files(MaybeRemoteCSSFiles) of
         {ok, LocalCSSFiles} ->
             case minify_files(ds_api_css, <<".css">>, LocalCSSFiles) of
@@ -39,6 +57,11 @@ pre_process_css_files(Diversity, VersionDir) ->
 
 pre_process_js_files(Diversity, VersionDir) ->
     MaybeRemoteJSFiles = get_diversity_json_files(<<"script">>, Diversity, VersionDir),
+    lager:debug(
+      "PREPROCESSING JS~n"
+      "FILES: ~p~n",
+      [MaybeRemoteJSFiles]
+     ),
     case fetch_remote_files(MaybeRemoteJSFiles) of
         {ok, LocalJSFiles} ->
             case minify_files(ds_api_js, <<".js">>, LocalJSFiles) of
@@ -81,7 +104,15 @@ minify_files(Module, Extension, [File0 | Files], Acc) ->
             minify_files(Module, Extension, Files, [File0 | Acc])
     end.
 
+concatenate_files([], _Output) ->
+    ok;
 concatenate_files(Files, Output) ->
+    lager:debug(
+      "CONCATENATING FILES~n"
+      "OUTPUT: ~p~n"
+      "FILES: ~p~n",
+      [Output, Files]
+     ),
     case file:open(Output, [append]) of
         {ok, OutputFile} ->
             concatenate_files_(Files, OutputFile);
@@ -102,37 +133,47 @@ concatenate_files_([File | Files], OutputFile) ->
             Error
     end.
 
-gzip_all_files(Directory) ->
-    Wildcard0 = filename:join(Directory, <<"**">>),
-    Wildcard1 = unicode:characters_to_list(Wildcard0),
-    Files = filelib:wildcard(Wildcard1),
-    gzip_files(Files).
+gzip_all_files(Directory0) ->
+    Directory1 = unicode:characters_to_list(Directory0),
+    Files0 = filelib:wildcard("**", Directory1),
+    Files1 = [unicode:characters_to_binary(File) || File <- Files0],
+    lager:debug(
+      "GZIPPING FILES~n"
+      "FILES: ~p~n",
+      [Files1]
+     ),
+    gzip_files(Files1).
 
 gzip_files([]) ->
     ok;
 gzip_files([File | Files]) ->
-    case filename:extension(File) of
-        <<".gz">> ->
-            gzip_files(Files);
-        _ ->
-            case file:read_file(File) of
-                {ok, Data} ->
-                    CompressedData = zlib:gzip(Data),
+    case filelib:is_regular(File) of
+        true ->
+            case filename:extension(File) of
+                <<".gz">> ->
+                    gzip_files(Files);
+                _ ->
                     CompressedFile = <<File/binary, ".gz">>,
-                    case file:write_file(CompressedFile, CompressedData) of
-                        ok    -> gzip_files(Files);
-                        Error -> Error
-                    end;
-                Error ->
-                    Error
-            end
+                    case gzip_file(File, CompressedFile) of
+                         ok    -> gzip_files(Files);
+                         Error -> Error
+                    end
+            end;
+        false ->
+            gzip_files(Files)
+    end.
+
+gzip_file(Input, Output) ->
+    case file:read_file(Input) of
+        {ok, Data} -> file:write_file(Output, zlib:gzip(Data));
+        Error      -> Error
     end.
 
 get_diversity_json(FilesDir) ->
     try
         DiversityFile = filename:join(FilesDir, <<"diversity.json">>),
         {ok, DiversityBin} = file:read_file(DiversityFile),
-        jiffy:decode(DiversityBin)
+        {ok, jiffy:decode(DiversityBin, [return_maps])}
     catch
         error:Error -> {error, Error}
     end.
@@ -154,22 +195,26 @@ get_diversity_json_files(Property, Diversity, VersionDir) ->
                       [{remote, Remote, Local}];
                   %% Otherwise treat it as a wildcard match for local files
                   false ->
-                      File1 = unicode:characters_to_list(File0),
-                      [unicode:characters_to_binary(File)
-                       || File <- filelib:wildcard(File1)]
+                      FilesDir = ds_api_component:files_dir(VersionDir),
+                      File1 = filename:join(FilesDir, File0),
+                      File2 = unicode:characters_to_list(File1),
+                      [unicode:characters_to_binary(File) || File <- filelib:wildcard(File2)]
               end
       end,
       Files
      ).
 
 process_remote_file_name(<<"//", URL/binary>> = Remote, VersionDir) ->
-    Local = filename:join(VersionDir, URL),
+    RemoteDir = ds_api_component:remote_dir(VersionDir),
+    Local = filename:join(RemoteDir, URL),
     {ok, <<"http:", Remote/binary>>, Local};
 process_remote_file_name(<<"http://", URL/binary>> = Remote, VersionDir) ->
-    Local = filename:join(VersionDir, URL),
+    RemoteDir = ds_api_component:remote_dir(VersionDir),
+    Local = filename:join(RemoteDir, URL),
     {ok, Remote, Local};
 process_remote_file_name(<<"https://", URL/binary>> = Remote, VersionDir) ->
-    Local = filename:join(VersionDir, URL),
+    RemoteDir = ds_api_component:remote_dir(VersionDir),
+    Local = filename:join(RemoteDir, URL),
     {ok, Remote, Local};
 process_remote_file_name(_VersionDir, _Local) ->
     false.
@@ -181,6 +226,12 @@ fetch_remote_files(RemoteFiles) ->
 fetch_remote_files([], Acc) ->
     {ok, lists:reverse(Acc)};
 fetch_remote_files([{remote, Remote, Local} | Files], Acc) ->
+    lager:debug(
+      "FETCHING REMOTE FILE~n"
+      "URL: ~p~n"
+      "FILE: ~p~n",
+      [Remote, Local]
+     ),
     case fetch_remote_file(Remote, Local) of
         ok    -> fetch_remote_files(Files, [Local | Acc]);
         Error -> Error
@@ -189,13 +240,27 @@ fetch_remote_files([Local | Files], Acc) ->
     fetch_remote_files(Files, [Local | Acc]).
 
 fetch_remote_file(Remote, Local) ->
-    HTTPOptions = [{timeout, 30000}],
-    Options = [{stream, Local}],
-    Request = {unicode:characters_to_list(Remote), []},
-    case httpc:request(get, Request, HTTPOptions, Options) of
-        {ok, saved_to_file} -> ok;
-        Error               -> Error
+    File = unicode:characters_to_list(Local),
+    case filelib:ensure_dir(File) of
+        ok ->
+            URL = unicode:characters_to_list(Remote),
+            HTTPOptions = [{timeout, 30000}],
+            Options = [{stream, File}],
+            case httpc:request(get, {URL, []}, HTTPOptions, Options) of
+                {ok, saved_to_file} -> ok;
+                Error               -> Error
+            end;
+        Error ->
+            Error
     end.
 
 check_diversity_json(_Component, _Version, _Diversity, _FilesDir) ->
     ok.
+
+write_compact_diversity_json(FilesDir, Diversity) ->
+    DiversityPath = filename:join(FilesDir, <<"diversity.json">>),
+    try jiffy:encode(Diversity) of
+        Data -> file:write_file(DiversityPath, Data)
+    catch
+        error:Error -> {error, Error}
+    end.
