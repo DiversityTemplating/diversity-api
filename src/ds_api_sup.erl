@@ -9,7 +9,5 @@ start_link() ->
 
 init([]) ->
     Procs = [{ds_api_component_mgr, {ds_api_component_mgr, start_link, []},
-              permanent, 5000, worker, [ds_api_component_mgr]},
-             {ds_api_cache, {ds_api_cache, start_link, []},
-              permanent, 5000, worker, [ds_api_cache]}],
+              permanent, 5000, worker, [ds_api_component_mgr]}],
     {ok, {{one_for_one, 10, 10}, Procs}}.

@@ -1,10 +1,9 @@
 PROJECT = ds_api
 PROJECT_DESCRIPTION = A CDN for Diversity components
 PROJECT_VERSION = 0.5.0
-PROJECT_REGISTERED = ds_api_cache ds_api_component_mgr
+PROJECT_REGISTERED = ds_api_component_mgr
 
-DEPS = cowboy jiffy gen_leader lager raven
-dep_gen_leader = git https://github.com/garret-smith/gen_leader_revival.git master
+DEPS = cowboy jiffy lager raven
 dep_raven      = git https://github.com/soundrop/raven-erlang.git master
 
 TEST_DEPS = meck
