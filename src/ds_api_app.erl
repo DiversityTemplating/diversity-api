@@ -15,7 +15,10 @@ start(_Type, _Args) ->
     ok = filelib:ensure_dir(ComponentsDir1),
 
     %% Setup cowboy routes
-    Constraints0 = [{component, nonempty}],
+    ComponentConstraintFun = fun (<<>>)      -> false;
+                                 (Component) -> {true, Component}
+                             end,
+    Constraints0 = [{component, function, ComponentConstraintFun}],
     VersionConstraintFun = fun (Value) ->
                                    case ds_api_version:to_version(Value) of
                                        {ok, Version}   -> {true, Version};

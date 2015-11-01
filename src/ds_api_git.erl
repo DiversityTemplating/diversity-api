@@ -2,9 +2,11 @@
 
 -export([clone/2, tags/1, copy_tag/3]).
 
-clone(RepoURL, ComponentDir) ->
-    Command = <<"git clone ", RepoURL/binary, " git">>,
-    case ds_api_util:cmd(Command, ComponentDir) of
+clone(RepoURL, GitDir) ->
+    CWD = filename:dirname(GitDir),
+    RepoDir = filename:basename(GitDir),
+    Command = <<"git clone ", RepoURL/binary, " ", RepoDir/binary>>,
+    case ds_api_util:cmd(Command, CWD) of
         {ok, _Reply} -> ok;
         Error        -> Error
     end.

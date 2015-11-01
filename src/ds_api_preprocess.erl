@@ -1,23 +1,21 @@
 -module(ds_api_preprocess).
 
--export([run/3]).
+-export([run/2]).
+-export([get_diversity_json_files/4]).
 
-run(Component, Version, VersionDir) ->
-    lager:debug(
-      "PREPROCESSING COMPONENT~n"
-      "Component: ~p~n"
-      "Version: ~p~n"
-      "Directory: ~p~n",
-      [Component, ds_api_version:to_binary(Version), VersionDir]
-     ),
-
-    FilesDir = ds_api_component:files_dir(VersionDir),
+run(Component, Version) ->
+    FilesDir = ds_api_component_mgr:files_dir(Component, Version),
+    DiversityPath = filename:join(FilesDir, <<"diversity.json">>),
     case get_diversity_json(FilesDir) of
         {ok, Diversity} ->
-            case check_diversity_json(Component, Version, Diversity, FilesDir) of
+            case check_diversity_json(Component, Version, Diversity) of
                 ok ->
-                    case write_compact_diversity_json(FilesDir, Diversity) of
-                        ok    -> pre_process_files(Diversity, VersionDir);
+                    case write_compact_diversity_json(DiversityPath, Diversity) of
+                        ok ->
+                            case pre_process_files(Component, Version, Diversity) of
+                                ok    -> {ok, Diversity};
+                                Error -> Error
+                            end;
                         Error -> Error
                     end;
                 Error ->
@@ -27,24 +25,19 @@ run(Component, Version, VersionDir) ->
             Error
     end.
 
-pre_process_files(Diversity, VersionDir) ->
-    case pre_process_css_files(Diversity, VersionDir) of
+pre_process_files(Component, Version, Diversity) ->
+    case pre_process_css_files(Component, Version, Diversity) of
         ok ->
-            case pre_process_js_files(Diversity, VersionDir) of
-                ok    -> gzip_all_files(VersionDir);
+            case pre_process_js_files(Component, Version, Diversity) of
+                ok    -> gzip_all_files(Component, Version);
                 Error -> Error
             end;
         Error ->
             Error
     end.
 
-pre_process_css_files(Diversity, VersionDir) ->
-    MaybeRemoteCSSFiles = get_diversity_json_files(<<"style">>, Diversity, VersionDir),
-    lager:debug(
-      "PREPROCESSING CSS~n"
-      "FILES: ~p~n",
-      [MaybeRemoteCSSFiles]
-     ),
+pre_process_css_files(Component, Version, Diversity) ->
+    MaybeRemoteCSSFiles = get_diversity_json_files(Component, Version, Diversity, <<"style">>),
     case fetch_remote_files(MaybeRemoteCSSFiles) of
         {ok, LocalCSSFiles} ->
             case minify_files(ds_api_css, <<".css">>, LocalCSSFiles) of
@@ -55,17 +48,13 @@ pre_process_css_files(Diversity, VersionDir) ->
             Error
     end.
 
-pre_process_js_files(Diversity, VersionDir) ->
-    MaybeRemoteJSFiles = get_diversity_json_files(<<"script">>, Diversity, VersionDir),
-    lager:debug(
-      "PREPROCESSING JS~n"
-      "FILES: ~p~n",
-      [MaybeRemoteJSFiles]
-     ),
+pre_process_js_files(Component, Version, Diversity) ->
+    MaybeRemoteJSFiles = get_diversity_json_files(Component, Version, Diversity, <<"script">>),
     case fetch_remote_files(MaybeRemoteJSFiles) of
         {ok, LocalJSFiles} ->
             case minify_files(ds_api_js, <<".js">>, LocalJSFiles) of
                 {ok, MinifiedJSFiles} ->
+                    VersionDir = ds_api_component_mgr:version_dir(Component, Version),
                     OutputFile = filename:join(VersionDir, <<"script.min.js">>),
                     concatenate_files(MinifiedJSFiles, OutputFile);
                 Error ->
@@ -107,12 +96,6 @@ minify_files(Module, Extension, [File0 | Files], Acc) ->
 concatenate_files([], _Output) ->
     ok;
 concatenate_files(Files, Output) ->
-    lager:debug(
-      "CONCATENATING FILES~n"
-      "OUTPUT: ~p~n"
-      "FILES: ~p~n",
-      [Output, Files]
-     ),
     case file:open(Output, [append]) of
         {ok, OutputFile} ->
             concatenate_files_(Files, OutputFile);
@@ -133,15 +116,11 @@ concatenate_files_([File | Files], OutputFile) ->
             Error
     end.
 
-gzip_all_files(Directory0) ->
+gzip_all_files(Component, Version) ->
+    Directory0 = ds_api_component_mgr:version_dir(Component, Version),
     Directory1 = unicode:characters_to_list(Directory0),
     Files0 = filelib:wildcard("**", Directory1),
-    Files1 = [unicode:characters_to_binary(File) || File <- Files0],
-    lager:debug(
-      "GZIPPING FILES~n"
-      "FILES: ~p~n",
-      [Files1]
-     ),
+    Files1 = [filename:join(Directory0, File) || File <- Files0],
     gzip_files(Files1).
 
 gzip_files([]) ->
@@ -153,20 +132,13 @@ gzip_files([File | Files]) ->
                 <<".gz">> ->
                     gzip_files(Files);
                 _ ->
-                    CompressedFile = <<File/binary, ".gz">>,
-                    case gzip_file(File, CompressedFile) of
+                    case ds_api_util:gzip(File) of
                          ok    -> gzip_files(Files);
                          Error -> Error
                     end
             end;
         false ->
             gzip_files(Files)
-    end.
-
-gzip_file(Input, Output) ->
-    case file:read_file(Input) of
-        {ok, Data} -> file:write_file(Output, zlib:gzip(Data));
-        Error      -> Error
     end.
 
 get_diversity_json(FilesDir) ->
@@ -178,14 +150,14 @@ get_diversity_json(FilesDir) ->
         error:Error -> {error, Error}
     end.
 
-get_diversity_json_files(Property, Diversity, VersionDir) ->
+get_diversity_json_files(Component, Version, Diversity, Property) ->
     %% Get the property, this is used for both style and script-property
     Files = case maps:find(Property, Diversity) of
                 {ok, F} when is_binary(F) -> [F];
                 {ok, Fs} when is_list(Fs) -> Fs;
                 error                     -> []
             end,
-
+    VersionDir = ds_api_component_mgr:version_dir(Component, Version),
     lists:flatmap(
       fun (File0) ->
               case process_remote_file_name(File0, VersionDir) of
@@ -194,9 +166,9 @@ get_diversity_json_files(Property, Diversity, VersionDir) ->
                   {ok, Remote, Local} ->
                       [{remote, Remote, Local}];
                   %% Otherwise treat it as a wildcard match for local files
-                  false ->
-                      FilesDir = ds_api_component:files_dir(VersionDir),
-                      File1 = filename:join(FilesDir, File0),
+                  Local ->
+                      FilesDir = ds_api_component_mgr:files_dir(Component, Version),
+                      File1 = filename:join(FilesDir, Local),
                       File2 = unicode:characters_to_list(File1),
                       [unicode:characters_to_binary(File) || File <- filelib:wildcard(File2)]
               end
@@ -216,22 +188,15 @@ process_remote_file_name(<<"https://", URL/binary>> = Remote, VersionDir) ->
     RemoteDir = ds_api_component:remote_dir(VersionDir),
     Local = filename:join(RemoteDir, URL),
     {ok, Remote, Local};
-process_remote_file_name(_VersionDir, _Local) ->
-    false.
+process_remote_file_name(Local, _VersionDir) ->
+    Local.
 
-%% TODO: Make request async and fire them all off and wait for responses
 fetch_remote_files(RemoteFiles) ->
     fetch_remote_files(RemoteFiles, []).
 
 fetch_remote_files([], Acc) ->
     {ok, lists:reverse(Acc)};
 fetch_remote_files([{remote, Remote, Local} | Files], Acc) ->
-    lager:debug(
-      "FETCHING REMOTE FILE~n"
-      "URL: ~p~n"
-      "FILE: ~p~n",
-      [Remote, Local]
-     ),
     case fetch_remote_file(Remote, Local) of
         ok    -> fetch_remote_files(Files, [Local | Acc]);
         Error -> Error
@@ -254,13 +219,12 @@ fetch_remote_file(Remote, Local) ->
             Error
     end.
 
-check_diversity_json(_Component, _Version, _Diversity, _FilesDir) ->
+check_diversity_json(_Component, _Version, _Diversity) ->
     ok.
 
-write_compact_diversity_json(FilesDir, Diversity) ->
-    DiversityPath = filename:join(FilesDir, <<"diversity.json">>),
+write_compact_diversity_json(Path, Diversity) ->
     try jiffy:encode(Diversity) of
-        Data -> file:write_file(DiversityPath, Data)
+        Data -> file:write_file(Path, Data)
     catch
         error:Error -> {error, Error}
     end.

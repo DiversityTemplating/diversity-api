@@ -1,6 +1,7 @@
 -module(ds_api_component_handler).
 
 -export([init/3]).
+-export([rest_init/2]).
 -export([allowed_methods/2]).
 -export([resource_exists/2]).
 -export([is_authorized/2]).
@@ -12,11 +13,15 @@
 -export([to_json/2]).
 -export([add_component/2]).
 
-init(_Type, Req0, []) ->
+init(_Type, Req, []) ->
+    {upgrade, protocol, cowboy_rest, Req, no_state}.
+
+rest_init(Req0, no_state) ->
     {Component, Req1} = cowboy_req:binding(component, Req0),
-    {upgrade, protocol, cowboy_rest, Req1, Component}.
+    {ok, Req1, Component}.
 
 allowed_methods(Req, Component) ->
+    io:format("COMPONENT: ~p~n", [Component]),
     Methods = [<<"GET">>, <<"HEAD">>, <<"PUT">>, <<"DELETE">>, <<"OPTIONS">>],
     {Methods, Req, Component}.
 
@@ -47,13 +52,21 @@ content_types_accepted(Req, Component) ->
 
 delete_resource(Req, Component) ->
     case ds_api_component_mgr:delete_component(Component) of
-        ok              -> {true, Req, Component};
-        {error, _Error} -> {false, Req, Component}
+        ok ->
+            {true, Req, Component};
+        {error, Error} -> 
+            lager:debug(
+              "COULD NOT DELETE COMPONENT~n"
+              "COMPONENT: ~p~n"
+              "ERROR: ~p~n",
+              [Component, Error]
+             ),
+            {false, Req, Component}
     end.
 
 to_json(Req, Component) ->
     Versions0 = ds_api_component_mgr:versions(Component),
-    Versions1 = [ds_api_util:to_binary(Version) || Version <- Versions0],
+    Versions1 = [ds_api_version:to_binary(Version) || Version <- Versions0],
     {jiffy:encode(Versions1), Req, Component}.
 
 add_component(Req0, Component) ->
@@ -63,7 +76,14 @@ add_component(Req0, Component) ->
             case ds_api_component_mgr:add_component(Component, RepoURL) of
                 ok ->
                     {true, Req1, Component};
-                {error, _Error} ->
+                {error, Error} ->
+                    lager:debug(
+                      "COULD NOT ADD COMPONENT~n"
+                      "COMPONENT: ~p~n"
+                      "REPOURL: ~p~n"
+                      "ERROR: ~p~n",
+                      [Component, RepoURL, Error]
+                     ),
                     {false, Req1, Component}
             end;
         undefined ->

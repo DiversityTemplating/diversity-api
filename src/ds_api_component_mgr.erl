@@ -16,12 +16,16 @@
 -export([publish/1]).
 -export([publish/2]).
 
+-export([diversity_json/2]).
+
 -export([component_dir/1]).
 -export([versions_dir/1]).
 -export([git_dir/1]).
 -export([version_dir/2]).
 -export([files_dir/2]).
 -export([remote_dir/2]).
+-export([sass_dir/2]).
+-export([temp_dir/2]).
 -export([file_path/3]).
 
 -export([init/1]).
@@ -31,7 +35,7 @@
 -export([terminate/2]).
 -export([code_change/3]).
 
--define(TAB, ?MODULE).
+-define(TAB,  components_ets).
 
 %% The ETS-table keeps all information about all currently loaded components and versions.
 %% There are three types of entries:
@@ -61,8 +65,8 @@ exists(Component, Version) ->
 
 published(Component, Version) ->
     case ets:lookup(?TAB, {version, Component, Version}) of
-        [{_, Published}] -> Published;
-        _Undefined       -> undefined
+        [{_, Published, _Diversity}] -> Published;
+        _Undefined                   -> undefined
     end.
 
 add_component(Component, RepoURL) ->
@@ -90,6 +94,12 @@ publish(ComponentVersions) when is_map(ComponentVersions) ->
 publish(Component, Version) ->
     publish(maps:put(Component, [Version], #{})).
 
+diversity_json(Component, Version) ->
+    case ets:lookup(?TAB, {version, Component, Version}) of
+        [{{version, Component, Version}, _Published, Diversity}] -> {ok, Diversity};
+        _Undefined                                               -> undefined
+    end.
+
 component_dir(Component) ->
     ComponentsDir = ds_api:components_dir(),
     filename:join(ComponentsDir, Component).
@@ -109,12 +119,19 @@ files_dir(Component, Version) ->
 remote_dir(Component, Version) ->
     filename:join(version_dir(Component, Version), remote).
 
+sass_dir(Component, Version) ->
+    filename:join(version_dir(Component, Version), sass).
+
+temp_dir(Component, Version) ->
+    Temp = integer_to_binary(erlang:phash2(erlang:make_ref())),
+    filename:join([version_dir(Component, Version), temp, Temp]).
+
 file_path(Component, Version, File) ->
     filename:join(files_dir(Component, Version), File).
 
 init(_Config) ->
-    ?TAB = ets:new(?TAB, [{read_concurrency, true}, named_table]),
-    true = ets:insert(?TAB, {components, ordsets:new()}),
+    bootstrap_components(),
+
     {ok, no_state}.
 
 handle_call({add_component, Component, RepoURL}, _From, State) ->
@@ -179,7 +196,7 @@ do_delete_component(Component) ->
     true = ets:delete(?TAB, {component, Component}),
 
     %% Remove all version entries
-    true = ets:match_delete(?TAB, {{version, Component, '_'}, '_'}),
+    true = ets:match_delete(?TAB, {{version, Component, '_'}, '_', '_'}),
 
     %% Delete the component directory
     ComponentDir = component_dir(Component),
@@ -192,9 +209,9 @@ do_add_version(Component, Version) ->
             {error, exists};
         false ->
             case do_create_version(Component, Version) of
-                ok ->
+                {ok, Diversity} ->
                     %% Create an unpublished entry
-                    VersionEntry = {{version, Component, Version}, false},
+                    VersionEntry = {{version, Component, Version}, false, Diversity},
                     true = ets:insert(?TAB, VersionEntry),
                     ok;
                 Error ->
@@ -205,7 +222,6 @@ do_add_version(Component, Version) ->
 
 do_create_version(Component, Version) ->
     VersionBin = ds_api_version:to_binary(Version),
-    VersionDir = version_dir(Component, Version),
     GitDir = git_dir(Component),
     FilesDir = files_dir(Component, Version),
     case get_git_versions(GitDir) of
@@ -213,7 +229,7 @@ do_create_version(Component, Version) ->
             case ordsets:is_element(Version, Versions) of
                 true ->
                     case ds_api_git:copy_tag(GitDir, VersionBin, FilesDir) of
-                        ok    -> ds_api_preprocess:run(Component, Version, VersionDir);
+                        ok    -> ds_api_preprocess:run(Component, Version);
                         Error -> Error
                     end;
                 false ->
@@ -250,8 +266,15 @@ get_version_table_updates(Component, NewVersions, Acc) ->
     Versions0 = versions(Component),
     Versions1 = ordsets:union(Versions0, ordsets:from_list(NewVersions)),
     ComponentEntry = {{component, Component}, Versions1},
-    PublishedVersionEntries = [{{version, Component, Version}, true} || Version <- NewVersions],
+    PublishedVersionEntries = get_published_version_entries(Component, NewVersions),
     [ComponentEntry | PublishedVersionEntries] ++ Acc.
+
+get_published_version_entries(Component, NewVersions) ->
+    [begin
+         Key = {version, Component, Version},
+         [{Key, false, Diversity}] = ets:lookup(?TAB, Key),
+         {Key, true, Diversity}
+     end || Version <- NewVersions].
 
 check_all_unpublished(ComponentVersions) when is_map(ComponentVersions) ->
     check_all_unpublished(maps:to_list(ComponentVersions));
@@ -272,7 +295,7 @@ check_unpublished(Component, [Version | Versions]) ->
     end.
 
 get_unpublished_versions() ->
-    UnpublishedVersions = ets:match(?TAB, {{version, '$1', '$2'}, false}),
+    UnpublishedVersions = ets:match(?TAB, {{version, '$1', '$2'}, false, '_'}),
     ordsets:from_list([{Component, Version} || [Component, Version] <- UnpublishedVersions]).
 
 get_git_versions(GitDir) ->
@@ -287,7 +310,32 @@ get_git_versions(GitDir) ->
                             end,
                             Tags
                            ),
-            ordsets:from_list(GitVersions);
+            {ok, ordsets:from_list(GitVersions)};
         _Error ->
             {error, could_not_fetch_tags}
     end.
+
+bootstrap_components() ->
+    ?TAB = ets:new(?TAB, [{read_concurrency, true}, named_table]),
+    Components = list_dir(ds_api:components_dir()),
+    ComponentEntries = lists:flatmap(fun bootstrap_component/1, Components),
+    true = ets:insert(?TAB, [{components, Components} | ComponentEntries]).
+
+bootstrap_component(Component) ->
+    VersionsDir = versions_dir(Component),
+    Versions0 = [begin
+                     {ok, Version} = ds_api_version:to_version(BinVersion),
+                     Version
+                 end || BinVersion <- list_dir(VersionsDir)],
+    Versions1 = ordsets:from_list(Versions0),
+    VersionEntries = [begin
+                          DiversityPath = filename:join(files_dir(Component, Version), <<"diversity.json">>),
+                          {ok, Diversity0} = file:read_file(DiversityPath),
+                          Diversity1 = jiffy:decode(Diversity0, [return_maps]),
+                          {{version, Component, Version}, true, Diversity1}
+                      end || Version <- Versions1],
+    [{{component, Component}, Versions1} | VersionEntries].
+
+list_dir(Dir) ->
+    {ok, Files} = file:list_dir(Dir),
+    [unicode:characters_to_binary(filename:basename(File)) || File <- Files].
