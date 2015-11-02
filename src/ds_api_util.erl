@@ -1,15 +1,21 @@
 -module(ds_api_util).
 
 -export([cmd/2]).
+-export([tmp_dir/0]).
 -export([delete_dir/1]).
 -export([minified_name/2]).
 -export([gzip/1]).
 -export([hash/1]).
+-export([is_remote_file/1]).
 
 cmd(Command, WorkingDir) ->
     PortOpts = [exit_status, {cd, WorkingDir}, binary, stderr_to_stdout],
     Port = erlang:open_port({spawn, Command}, PortOpts),
     wait_for_reply(Port).
+
+tmp_dir() ->
+    TmpName = integer_to_binary(erlang:phash2(self())),
+    filename:join(ds_api:tmp_dir(), TmpName).
 
 %% TODO: More correct timeout (now it's a timeout from last received chunk)
 wait_for_reply(Port) ->
@@ -84,3 +90,7 @@ gzip(Input) ->
 hash(Data) ->
     Hash = crypto:hash(sha256, Data),
     << <<Y>> || <<X:4>> <= Hash, Y <- integer_to_list(X,16)>>.
+
+is_remote_file(<<"http://", _/binary>>)  -> true;
+is_remote_file(<<"https://", _/binary>>) -> true;
+is_remote_file(_Local)                   -> false.

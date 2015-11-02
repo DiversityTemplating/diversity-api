@@ -1,7 +1,7 @@
 PROJECT = ds_api
 PROJECT_DESCRIPTION = A CDN for Diversity components
 PROJECT_VERSION = 0.5.0
-PROJECT_REGISTERED = ds_api_component_mgr
+PROJECT_REGISTERED = ds_api_cache
 
 DEPS = cowboy jiffy lager raven
 dep_raven      = git https://github.com/soundrop/raven-erlang.git master

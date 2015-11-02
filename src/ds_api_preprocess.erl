@@ -1,44 +1,37 @@
 -module(ds_api_preprocess).
 
--export([run/2]).
--export([get_diversity_json_files/4]).
+-export([run/3]).
 
-run(Component, Version) ->
-    FilesDir = ds_api_component_mgr:files_dir(Component, Version),
-    DiversityPath = filename:join(FilesDir, <<"diversity.json">>),
-    case get_diversity_json(FilesDir) of
-        {ok, Diversity} ->
-            case check_diversity_json(Component, Version, Diversity) of
+run(Component, Version, TmpDir) ->
+    DiversityPath = filename:join(TmpDir, <<"files/diversity.json">>),
+    case file:read_file(DiversityPath) of
+        {ok, Diversity0} ->
+            Diversity1 = jiffy:decode(Diversity0),
+            case check_diversity_json(Component, Version, Diversity1) of
                 ok ->
-                    case write_compact_diversity_json(DiversityPath, Diversity) of
-                        ok ->
-                            case pre_process_files(Component, Version, Diversity) of
-                                ok    -> {ok, Diversity};
-                                Error -> Error
-                            end;
-                        Error -> Error
-                    end;
+                    ok = write_compact_diversity_json(DiversityPath, Diversity1),
+                    pre_process_files(Diversity1, TmpDir);
                 Error ->
                     Error
             end;
-        Error ->
-            Error
+        _Error ->
+            {error, <<"Could not read diversity.json.">>}
     end.
 
-pre_process_files(Component, Version, Diversity) ->
-    case pre_process_css_files(Component, Version, Diversity) of
+pre_process_files(Diversity, TmpDir) ->
+    case pre_process_css_files(Diversity, TmpDir) of
         ok ->
-            case pre_process_js_files(Component, Version, Diversity) of
-                ok    -> gzip_all_files(Component, Version);
+            case pre_process_js_files(Diversity, TmpDir) of
+                ok    -> gzip_all_files(TmpDir);
                 Error -> Error
             end;
         Error ->
             Error
     end.
 
-pre_process_css_files(Component, Version, Diversity) ->
-    MaybeRemoteCSSFiles = get_diversity_json_files(Component, Version, Diversity, <<"style">>),
-    case fetch_remote_files(MaybeRemoteCSSFiles) of
+pre_process_css_files(Diversity, TmpDir) ->
+    MaybeRemoteCSSFiles = ds_api_component:diversity_json_files(<<"style">>, Diversity, TmpDir),
+    case fetch_remote_files(MaybeRemoteCSSFiles, TmpDir) of
         {ok, LocalCSSFiles} ->
             case minify_files(ds_api_css, <<".css">>, LocalCSSFiles) of
                 {ok, _Minified} -> ok;
@@ -48,14 +41,13 @@ pre_process_css_files(Component, Version, Diversity) ->
             Error
     end.
 
-pre_process_js_files(Component, Version, Diversity) ->
-    MaybeRemoteJSFiles = get_diversity_json_files(Component, Version, Diversity, <<"script">>),
-    case fetch_remote_files(MaybeRemoteJSFiles) of
+pre_process_js_files(Diversity, TmpDir) ->
+    MaybeRemoteJSFiles = ds_api_component:diversity_json_files(<<"script">>, Diversity, TmpDir),
+    case fetch_remote_files(MaybeRemoteJSFiles, TmpDir) of
         {ok, LocalJSFiles} ->
             case minify_files(ds_api_js, <<".js">>, LocalJSFiles) of
                 {ok, MinifiedJSFiles} ->
-                    VersionDir = ds_api_component_mgr:version_dir(Component, Version),
-                    OutputFile = filename:join(VersionDir, <<"script.min.js">>),
+                    OutputFile = filename:join(TmpDir, <<"script.min.js">>),
                     concatenate_files(MinifiedJSFiles, OutputFile);
                 Error ->
                     Error
@@ -97,10 +89,8 @@ concatenate_files([], _Output) ->
     ok;
 concatenate_files(Files, Output) ->
     case file:open(Output, [append]) of
-        {ok, OutputFile} ->
-            concatenate_files_(Files, OutputFile);
-        Error ->
-            Error
+        {ok, OutputFile} -> concatenate_files_(Files, OutputFile);
+        Error            -> Error
     end.
 
 concatenate_files_([], OutputFile) ->
@@ -109,19 +99,16 @@ concatenate_files_([File | Files], OutputFile) ->
     case file:read_file(File) of
         {ok, Data} ->
             case file:write(OutputFile, Data) of
-                ok    -> concatenate_files_(Files, OutputFile);
-                Error -> Error
+                ok     -> concatenate_files_(Files, OutputFile);
+                _Error -> {error, <<"Could not concatenate file ", File/binary>>}
             end;
         Error ->
             Error
     end.
 
-gzip_all_files(Component, Version) ->
-    Directory0 = ds_api_component_mgr:version_dir(Component, Version),
-    Directory1 = unicode:characters_to_list(Directory0),
-    Files0 = filelib:wildcard("**", Directory1),
-    Files1 = [filename:join(Directory0, File) || File <- Files0],
-    gzip_files(Files1).
+gzip_all_files(Directory) ->
+    Files = filelib:wildcard(unicode:characters_to_list(Directory) ++ "/**"),
+    gzip_files([unicode:characters_to_binary(File) || File <- Files]).
 
 gzip_files([]) ->
     ok;
@@ -133,87 +120,43 @@ gzip_files([File | Files]) ->
                     gzip_files(Files);
                 _ ->
                     case ds_api_util:gzip(File) of
-                         ok    -> gzip_files(Files);
-                         Error -> Error
+                         ok     -> gzip_files(Files);
+                         _Error -> {error, <<"Could not gzip ", File/binary>>}
                     end
             end;
         false ->
             gzip_files(Files)
     end.
 
-get_diversity_json(FilesDir) ->
-    try
-        DiversityFile = filename:join(FilesDir, <<"diversity.json">>),
-        {ok, DiversityBin} = file:read_file(DiversityFile),
-        {ok, jiffy:decode(DiversityBin, [return_maps])}
-    catch
-        error:Error -> {error, Error}
+fetch_remote_files(RemoteFiles, TmpDir) ->
+    fetch_remote_files(RemoteFiles, TmpDir, []).
+
+fetch_remote_files([], _TmpDir, Acc) ->
+    {ok, lists:reverse(Acc)};
+fetch_remote_files([File | Files], TmpDir, Acc) ->
+    case ds_api_util:is_remote_file(File) of
+        true ->
+            case fetch_remote_file(File, TmpDir) of
+                {ok, LocalFile} -> fetch_remote_files(Files, TmpDir, [LocalFile | Acc]);
+                Error           -> Error
+            end;
+        false ->
+            fetch_remote_files(Files, TmpDir, [File | Acc])
     end.
 
-get_diversity_json_files(Component, Version, Diversity, Property) ->
-    %% Get the property, this is used for both style and script-property
-    Files = case maps:find(Property, Diversity) of
-                {ok, F} when is_binary(F) -> [F];
-                {ok, Fs} when is_list(Fs) -> Fs;
-                error                     -> []
-            end,
-    VersionDir = ds_api_component_mgr:version_dir(Component, Version),
-    lists:flatmap(
-      fun (File0) ->
-              case process_remote_file_name(File0, VersionDir) of
-                  %% If the file is a remote file we get a local path
-                  %% to it
-                  {ok, Remote, Local} ->
-                      [{remote, Remote, Local}];
-                  %% Otherwise treat it as a wildcard match for local files
-                  Local ->
-                      FilesDir = ds_api_component_mgr:files_dir(Component, Version),
-                      File1 = filename:join(FilesDir, Local),
-                      File2 = unicode:characters_to_list(File1),
-                      [unicode:characters_to_binary(File) || File <- filelib:wildcard(File2)]
-              end
-      end,
-      Files
-     ).
-
-process_remote_file_name(<<"//", URL/binary>> = Remote, VersionDir) ->
-    RemoteDir = ds_api_component:remote_dir(VersionDir),
-    Local = filename:join(RemoteDir, URL),
-    {ok, <<"http:", Remote/binary>>, Local};
-process_remote_file_name(<<"http://", URL/binary>> = Remote, VersionDir) ->
-    RemoteDir = ds_api_component:remote_dir(VersionDir),
-    Local = filename:join(RemoteDir, URL),
-    {ok, Remote, Local};
-process_remote_file_name(<<"https://", URL/binary>> = Remote, VersionDir) ->
-    RemoteDir = ds_api_component:remote_dir(VersionDir),
-    Local = filename:join(RemoteDir, URL),
-    {ok, Remote, Local};
-process_remote_file_name(Local, _VersionDir) ->
-    Local.
-
-fetch_remote_files(RemoteFiles) ->
-    fetch_remote_files(RemoteFiles, []).
-
-fetch_remote_files([], Acc) ->
-    {ok, lists:reverse(Acc)};
-fetch_remote_files([{remote, Remote, Local} | Files], Acc) ->
-    case fetch_remote_file(Remote, Local) of
-        ok    -> fetch_remote_files(Files, [Local | Acc]);
-        Error -> Error
-    end;
-fetch_remote_files([Local | Files], Acc) ->
-    fetch_remote_files(Files, [Local | Acc]).
-
-fetch_remote_file(Remote, Local) ->
-    File = unicode:characters_to_list(Local),
-    case filelib:ensure_dir(File) of
+fetch_remote_file(RemoteFile, TmpDir) ->
+    LocalFile = ds_api_component:file_path(RemoteFile, TmpDir),
+    LocalFileStr = unicode:characters_to_list(LocalFile),
+    case filelib:ensure_dir(LocalFileStr) of
         ok ->
-            URL = unicode:characters_to_list(Remote),
+            RemoteFileStr = unicode:characters_to_list(RemoteFile),
             HTTPOptions = [{timeout, 30000}],
-            Options = [{stream, File}],
-            case httpc:request(get, {URL, []}, HTTPOptions, Options) of
-                {ok, saved_to_file} -> ok;
-                Error               -> Error
+            Options = [{stream, LocalFileStr}],
+            case httpc:request(get, {RemoteFileStr, []}, HTTPOptions, Options) of
+                {ok, saved_to_file} ->
+                    ok;
+                _Error ->
+                    {error, <<"Could not fetch remote file from ", RemoteFile/binary>>}
             end;
         Error ->
             Error

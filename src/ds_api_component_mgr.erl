@@ -159,32 +159,6 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-do_add_component(Component, RepoURL) ->
-    case exists(Component) of
-        true ->
-            {error, component_exists};
-        false ->
-            case do_create_component(Component, RepoURL) of
-                ok ->
-                    Components0 = components(),
-                    Components1 = ordsets:add_element(Component, Components0),
-                    ComponentsEntry = {components, Components1},
-                    ComponentEntry = {{component, Component}, ordsets:new()},
-                    true = ets:insert(?TAB, [ComponentsEntry, ComponentEntry]),
-                    ok;
-                Error ->
-                    ds_api_util:delete_dir(component_dir(Component)),
-                    Error
-            end
-    end.
-
-do_create_component(Component, RepoURL) ->
-    GitDir = git_dir(Component),
-    VersionsDir = versions_dir(Component),
-    case filelib:ensure_dir(VersionsDir) of
-        ok    -> ds_api_git:clone(RepoURL, GitDir);
-        Error -> Error
-    end.
 
 do_delete_component(Component) ->
     %% Remove component from the components entry
@@ -203,41 +177,7 @@ do_delete_component(Component) ->
     ds_api_util:delete_dir(ComponentDir),
     ok.
 
-do_add_version(Component, Version) ->
-    case exists(Component, Version) of
-        true ->
-            {error, exists};
-        false ->
-            case do_create_version(Component, Version) of
-                {ok, Diversity} ->
-                    %% Create an unpublished entry
-                    VersionEntry = {{version, Component, Version}, false, Diversity},
-                    true = ets:insert(?TAB, VersionEntry),
-                    ok;
-                Error ->
-                    ds_api_util:delete_dir(version_dir(Component, Version)),
-                    Error
-            end
-    end.
 
-do_create_version(Component, Version) ->
-    VersionBin = ds_api_version:to_binary(Version),
-    GitDir = git_dir(Component),
-    FilesDir = files_dir(Component, Version),
-    case get_git_versions(GitDir) of
-        {ok, Versions} ->
-            case ordsets:is_element(Version, Versions) of
-                true ->
-                    case ds_api_git:copy_tag(GitDir, VersionBin, FilesDir) of
-                        ok    -> ds_api_preprocess:run(Component, Version);
-                        Error -> Error
-                    end;
-                false ->
-                    {error, unknown_version}
-            end;
-        Error ->
-            Error
-    end.
 
 do_delete_version(Component, Version) ->
     VersionDir = version_dir(Component, Version),
@@ -298,22 +238,6 @@ get_unpublished_versions() ->
     UnpublishedVersions = ets:match(?TAB, {{version, '$1', '$2'}, false, '_'}),
     ordsets:from_list([{Component, Version} || [Component, Version] <- UnpublishedVersions]).
 
-get_git_versions(GitDir) ->
-    case ds_api_git:tags(GitDir) of
-        {ok, Tags} ->
-            GitVersions = lists:filtermap(
-                            fun (Tag) ->
-                                    case ds_api_version:to_version(Tag) of
-                                        {ok, V}         -> {true, V};
-                                        {error, badarg} -> false
-                                    end
-                            end,
-                            Tags
-                           ),
-            {ok, ordsets:from_list(GitVersions)};
-        _Error ->
-            {error, could_not_fetch_tags}
-    end.
 
 bootstrap_components() ->
     ?TAB = ets:new(?TAB, [{read_concurrency, true}, named_table]),

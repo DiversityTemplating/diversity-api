@@ -11,5 +11,4 @@ content_types_provided(Req, State) ->
     {[{{<<"application">>, <<"json">>, []}, to_json}], Req, State}.
 
 to_json(Req, State) ->
-    Components = ds_api_component_mgr:components(),
-    {jiffy:encode(Components), Req, State}.
+    {jiffy:encode(ds_api_component:components()), Req, State}.

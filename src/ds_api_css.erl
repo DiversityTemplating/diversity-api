@@ -3,7 +3,7 @@
 -export([minify/1]).
 -export([compile/3]).
 -export([compile_component_sass/5]).
--export([get_local_files/2]).
+-export([style_files/2]).
 -export([variables_to_binary/1]).
 
 minify(CSSFile) ->
@@ -66,15 +66,12 @@ get_version_local_path(VersionDir, File) ->
     <<_:VersionDirSize/binary, $/, VersionLocalFile/binary>> = File,
     VersionLocalFile.
 
-get_local_files(Component, Version) ->
-    {ok, Diversity} = ds_api_component_mgr:diversity_json(Component, Version),
-    CSSFiles0 = ds_api_preprocess:get_diversity_json_files(Component, Version, Diversity, <<"style">>),
-    [begin
-         case File of
-             {ok, _Remote, Local} -> minified_name(Local);
-             Local                -> minified_name(Local)
-         end
-     end || File <- CSSFiles0].
+style_files(Component, Version) ->
+    VersionDir = ds_api_component:version_dir(Component, Version),
+    case ds_api_component:diversity_json(Component, Version, VersionDir) of
+        {ok, Diversity} -> ds_api_component:diversity_json_files(<<"style">>, Diversity, VersionDir);
+        undefined       -> undefined
+    end.
 
 minified_name(CSSFile) ->
     ds_api_util:minified_name(CSSFile, <<".css">>).

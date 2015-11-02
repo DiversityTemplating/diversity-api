@@ -6,12 +6,11 @@
 -export([resource_exists/2]).
 -export([is_authorized/2]).
 -export([is_conflict/2]).
--export([generate_etag/2]).
 -export([content_types_provided/2]).
 -export([content_types_accepted/2]).
 -export([delete_resource/2]).
 -export([to_json/2]).
--export([add_component/2]).
+-export([handle_add_component/2]).
 
 init(_Type, Req, []) ->
     {upgrade, protocol, cowboy_rest, Req, no_state}.
@@ -21,15 +20,10 @@ rest_init(Req0, no_state) ->
     {ok, Req1, Component}.
 
 allowed_methods(Req, Component) ->
-    io:format("COMPONENT: ~p~n", [Component]),
-    Methods = [<<"GET">>, <<"HEAD">>, <<"PUT">>, <<"DELETE">>, <<"OPTIONS">>],
-    {Methods, Req, Component}.
+    {[<<"GET">>, <<"HEAD">>, <<"PUT">>, <<"DELETE">>, <<"OPTIONS">>], Req, Component}.
 
 resource_exists(Req, Component) ->
-    {ds_api_component_mgr:exists(Component), Req, Component}.
-
-generate_etag(Req, Component) ->
-    {{strong, <<"components/", Component/binary, "/versions">>}, Req, Component}.
+    {filelib:is_dir(ds_api_component:component_dir(Component)), Req, Component}.
 
 is_authorized(Req0, Component) ->
     case cowboy_req:method(Req0) of
@@ -42,50 +36,33 @@ is_authorized(Req0, Component) ->
     end.
 
 is_conflict(Req, Component) ->
-    {ds_api_component_mgr:exists(Component), Req, Component}.
+    {filelib:is_dir(ds_api_component:component_dir(Component)), Req, Component}.
 
 content_types_provided(Req, Component) ->
     {[{{<<"application">>, <<"json">>, []}, to_json}], Req, Component}.
 
 content_types_accepted(Req, Component) ->
-    {[{{<<"application">>, <<"x-www-form-urlencoded">>, []}, add_component}], Req, Component}.
+    {[{{<<"application">>, <<"x-www-form-urlencoded">>, []}, handle_add_component}], Req, Component}.
 
 delete_resource(Req, Component) ->
-    case ds_api_component_mgr:delete_component(Component) of
-        ok ->
-            {true, Req, Component};
-        {error, Error} -> 
-            lager:debug(
-              "COULD NOT DELETE COMPONENT~n"
-              "COMPONENT: ~p~n"
-              "ERROR: ~p~n",
-              [Component, Error]
-             ),
-            {false, Req, Component}
-    end.
+    ok = ds_api_component:delete_component(Component),
+    {true, Req, Component}.
 
 to_json(Req, Component) ->
-    Versions0 = ds_api_component_mgr:versions(Component),
-    Versions1 = [ds_api_version:to_binary(Version) || Version <- Versions0],
-    {jiffy:encode(Versions1), Req, Component}.
+    Versions = [ds_api_version:to_binary(Version) || Version <- ds_api_component:versions(Component)],
+    {jiffy:encode(Versions), Req, Component}.
 
-add_component(Req0, Component) ->
-    {ok, QS, Req1} = cowboy_req:body_qs(Req0),
-    case proplists:get_value(<<"repo_url">>, QS) of
+handle_add_component(Req0, Component) ->
+    {ok, Query, Req1} = cowboy_req:body_qs(Req0),
+    case proplists:get_value(<<"repo_url">>, Query) of
         RepoURL when is_binary(RepoURL) ->
-            case ds_api_component_mgr:add_component(Component, RepoURL) of
+            case ds_api_component:add_component(Component, RepoURL) of
                 ok ->
                     {true, Req1, Component};
                 {error, Error} ->
-                    lager:debug(
-                      "COULD NOT ADD COMPONENT~n"
-                      "COMPONENT: ~p~n"
-                      "REPOURL: ~p~n"
-                      "ERROR: ~p~n",
-                      [Component, RepoURL, Error]
-                     ),
-                    {false, Req1, Component}
+                    {false, cowboy_req:set_resp_body(Error, Req1), Component}
             end;
         undefined ->
-            {false, Req1, Component}
+            Req2 = cowboy_req:set_resp_body(<<"No repository URL specified.">>, Req1),
+            {false, Req2, Component}
     end.
