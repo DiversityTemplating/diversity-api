@@ -1,7 +1,6 @@
 -module(ds_api_component_handler).
 
--export([init/3]).
--export([rest_init/2]).
+-export([init/2]).
 -export([allowed_methods/2]).
 -export([resource_exists/2]).
 -export([is_authorized/2]).
@@ -12,31 +11,28 @@
 -export([to_json/2]).
 -export([handle_add_component/2]).
 
-init(_Type, Req, []) ->
-    {upgrade, protocol, cowboy_rest, Req, no_state}.
-
-rest_init(Req0, no_state) ->
-    {Component, Req1} = cowboy_req:binding(component, Req0),
-    {ok, Req1, Component}.
+init(Req0, []) ->
+    Req1 = ds_api_util:set_access_control_headers(Req0),
+    {cowboy_rest, Req1, cowboy_req:binding(component, Req1)}.
 
 allowed_methods(Req, Component) ->
-    {[<<"GET">>, <<"HEAD">>, <<"PUT">>, <<"DELETE">>, <<"OPTIONS">>], Req, Component}.
+    Methods = [<<"GET">>, <<"HEAD">>, <<"PUT">>, <<"DELETE">>, <<"OPTIONS">>],
+    {Methods, Req, Component}.
 
 resource_exists(Req, Component) ->
-    {filelib:is_dir(ds_api_component:component_dir(Component)), Req, Component}.
+    {component_exists(Component), Req, Component}.
 
-is_authorized(Req0, Component) ->
-    case cowboy_req:method(Req0) of
-        {Method, Req1} when Method =:= <<"PUT">>;
-                            Method =:= <<"DELETE">> ->
-            % TODO: API-KEY
-            {true, Req1, Component};
+is_authorized(Req, Component) ->
+    case cowboy_req:method(Req) of
+        Method when Method =:= <<"PUT">>;
+                    Method =:= <<"DELETE">> ->
+            {ds_api_auth:is_authorized(Req), Req, Component};
         _ ->
-            {true, Req0, Component}
+            {true, Req, Component}
     end.
 
 is_conflict(Req, Component) ->
-    {filelib:is_dir(ds_api_component:component_dir(Component)), Req, Component}.
+    {component_exists(Component), Req, Component}.
 
 content_types_provided(Req, Component) ->
     {[{{<<"application">>, <<"json">>, []}, to_json}], Req, Component}.
@@ -59,10 +55,12 @@ handle_add_component(Req0, Component) ->
             case ds_api_component:add_component(Component, RepoURL) of
                 ok ->
                     {true, Req1, Component};
-                {error, Error} ->
-                    {false, cowboy_req:set_resp_body(Error, Req1), Component}
+                {error, _Error} ->
+                    {false, Req1, Component}
             end;
         undefined ->
-            Req2 = cowboy_req:set_resp_body(<<"No repository URL specified.">>, Req1),
-            {false, Req2, Component}
+            {false, Req1, Component}
     end.
+
+component_exists(Component) ->
+    filelib:is_dir(ds_api_component:component_dir(Component)).

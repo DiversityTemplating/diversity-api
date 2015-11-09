@@ -1,11 +1,12 @@
 -module(ds_api_components_handler).
 
--export([init/3]).
+-export([init/2]).
 -export([content_types_provided/2]).
 -export([to_json/2]).
 
-init(_Type, Req, []) ->
-    {upgrade, protocol, cowboy_rest, Req, no_state}.
+init(Req0, []) ->
+    Req1 = ds_api_util:set_access_control_headers(Req0),
+    {cowboy_rest, Req1, no_state}.
 
 content_types_provided(Req, State) ->
     {[{{<<"application">>, <<"json">>, []}, to_json}], Req, State}.

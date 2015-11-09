@@ -4,7 +4,8 @@ PROJECT_VERSION = 0.5.0
 PROJECT_REGISTERED = ds_api_cache
 
 DEPS = cowboy jiffy lager raven
-dep_raven      = git https://github.com/soundrop/raven-erlang.git master
+dep_cowboy = git https://github.com/ninenines/cowboy.git master
+dep_raven = git https://github.com/soundrop/raven-erlang.git master
 
 TEST_DEPS = meck
 dep_meck = git https://github.com/eproxus/meck.git master

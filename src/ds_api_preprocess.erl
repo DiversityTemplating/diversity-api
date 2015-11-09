@@ -1,60 +1,69 @@
 -module(ds_api_preprocess).
 
 -export([run/3]).
+-export([expand_file_names/2]).
+-export([fetch_remote_files/2]).
+-export([local_file_names/2]).
 
-run(Component, Version, TmpDir) ->
-    DiversityPath = filename:join(TmpDir, <<"files/diversity.json">>),
-    case file:read_file(DiversityPath) of
-        {ok, Diversity0} ->
-            Diversity1 = jiffy:decode(Diversity0),
-            case check_diversity_json(Component, Version, Diversity1) of
+run(Component, Version, VersionDir) ->
+    FilesDir = ds_api_component:files_dir(VersionDir),
+    DiversityPath = filename:join(FilesDir, <<"diversity.json">>),
+    case ds_api_util:read_json_file(DiversityPath) of
+        {ok, Diversity} ->
+            case check_diversity_json(Component, Version, Diversity) of
                 ok ->
-                    ok = write_compact_diversity_json(DiversityPath, Diversity1),
-                    pre_process_files(Diversity1, TmpDir);
+                    ok = ds_api_util:write_json_file(DiversityPath, Diversity),
+                    pre_process_files(Diversity, VersionDir);
                 Error ->
                     Error
             end;
         _Error ->
-            {error, <<"Could not read diversity.json.">>}
+            {error, <<"Error when trying to read diversity.json">>}
     end.
 
-pre_process_files(Diversity, TmpDir) ->
-    case pre_process_css_files(Diversity, TmpDir) of
+pre_process_files(Diversity, VersionDir) ->
+    case pre_process_css_files(Diversity, VersionDir) of
         ok ->
-            case pre_process_js_files(Diversity, TmpDir) of
-                ok    -> gzip_all_files(TmpDir);
+            case pre_process_js_files(Diversity, VersionDir) of
+                ok    -> gzip_all_files(VersionDir);
                 Error -> Error
             end;
         Error ->
             Error
     end.
 
-pre_process_css_files(Diversity, TmpDir) ->
-    MaybeRemoteCSSFiles = ds_api_component:diversity_json_files(<<"style">>, Diversity, TmpDir),
-    case fetch_remote_files(MaybeRemoteCSSFiles, TmpDir) of
-        {ok, LocalCSSFiles} ->
+pre_process_css_files(#{<<"style">> := Styles}, VersionDir) ->
+    MaybeRemoteCSSFiles = expand_file_names(Styles, VersionDir),
+    case fetch_remote_files(MaybeRemoteCSSFiles, VersionDir) of
+        ok ->
+            LocalCSSFiles = local_file_names(MaybeRemoteCSSFiles, VersionDir),
             case minify_files(ds_api_css, <<".css">>, LocalCSSFiles) of
                 {ok, _Minified} -> ok;
                 Error           -> Error
             end;
         Error ->
             Error
-    end.
+    end;
+pre_process_css_files(_Diversity, _VersionDir) ->
+    ok.
 
-pre_process_js_files(Diversity, TmpDir) ->
-    MaybeRemoteJSFiles = ds_api_component:diversity_json_files(<<"script">>, Diversity, TmpDir),
-    case fetch_remote_files(MaybeRemoteJSFiles, TmpDir) of
-        {ok, LocalJSFiles} ->
+pre_process_js_files(#{<<"script">> := Scripts}, VersionDir) ->
+    MaybeRemoteJSFiles = expand_file_names(Scripts, VersionDir),
+    case fetch_remote_files(MaybeRemoteJSFiles, VersionDir) of
+        ok ->
+            LocalJSFiles = local_file_names(MaybeRemoteJSFiles, VersionDir),
             case minify_files(ds_api_js, <<".js">>, LocalJSFiles) of
                 {ok, MinifiedJSFiles} ->
-                    OutputFile = filename:join(TmpDir, <<"script.min.js">>),
-                    concatenate_files(MinifiedJSFiles, OutputFile);
+                    OutputFile = filename:join(VersionDir, <<"script.min.js">>),
+                    ds_api_util:concatenate_files(MinifiedJSFiles, <<";">>, OutputFile);
                 Error ->
                     Error
             end;
         Error ->
             Error
-    end.
+    end;
+pre_process_js_files(_Diversity, _VersionDir) ->
+    ok.
 
 minify_files(Module, Extension, Files) ->
     minify_files(Module, Extension, Files, []).
@@ -76,6 +85,8 @@ minify_files(Module, Extension, [File0 | Files], Acc) ->
                 _ ->
                     case Module:minify(File0) of
                         {ok, Minified} ->
+                            {_Size, Modified} = ds_api_util:get_file_info(File0),
+                            ok = file:change_time(Minified, Modified),
                             minify_files(Module, Extension, Files, [Minified | Acc]);
                         Error ->
                             Error
@@ -83,27 +94,6 @@ minify_files(Module, Extension, [File0 | Files], Acc) ->
             end;
         _NotMinifiable ->
             minify_files(Module, Extension, Files, [File0 | Acc])
-    end.
-
-concatenate_files([], _Output) ->
-    ok;
-concatenate_files(Files, Output) ->
-    case file:open(Output, [append]) of
-        {ok, OutputFile} -> concatenate_files_(Files, OutputFile);
-        Error            -> Error
-    end.
-
-concatenate_files_([], OutputFile) ->
-    file:close(OutputFile);
-concatenate_files_([File | Files], OutputFile) ->
-    case file:read_file(File) of
-        {ok, Data} ->
-            case file:write(OutputFile, Data) of
-                ok     -> concatenate_files_(Files, OutputFile);
-                _Error -> {error, <<"Could not concatenate file ", File/binary>>}
-            end;
-        Error ->
-            Error
     end.
 
 gzip_all_files(Directory) ->
@@ -128,24 +118,51 @@ gzip_files([File | Files]) ->
             gzip_files(Files)
     end.
 
-fetch_remote_files(RemoteFiles, TmpDir) ->
-    fetch_remote_files(RemoteFiles, TmpDir, []).
+expand_file_names(File, VersionDir) when is_binary(File) ->
+    expand_file_names([File], VersionDir);
+expand_file_names(Files, VersionDir) when is_list(Files) ->
+    lists:flatmap(
+      fun (<<"//", _/binary>> = Remote) ->
+              [<<"http:", Remote/binary>>];
+          (<<"http://", _/binary>> = Remote) ->
+              [Remote];
+          (<<"https://", _/binary>> = Remote) ->
+              [Remote];
+          (MaybeWildcard) ->
+              FilesDir = ds_api_component:files_dir(VersionDir),
+              Wildcard = unicode:characters_to_list(filename:join(FilesDir, MaybeWildcard)),
+              [unicode:characters_to_binary(File) || File <- filelib:wildcard(Wildcard)]
+      end,
+      Files
+     ).
 
-fetch_remote_files([], _TmpDir, Acc) ->
-    {ok, lists:reverse(Acc)};
-fetch_remote_files([File | Files], TmpDir, Acc) ->
-    case ds_api_util:is_remote_file(File) of
-        true ->
-            case fetch_remote_file(File, TmpDir) of
-                {ok, LocalFile} -> fetch_remote_files(Files, TmpDir, [LocalFile | Acc]);
-                Error           -> Error
-            end;
+local_file_names(Files, VersionDir) ->
+    [local_file_name(File, VersionDir) || File <- Files].
+
+local_file_name(File, VersionDir) ->
+    case is_remote_file(File) of
+        true  ->
+            RemoteDir = ds_api_component:remote_dir(VersionDir),
+            filename:join(RemoteDir, local_file_path(File));
         false ->
-            fetch_remote_files(Files, TmpDir, [File | Acc])
+            File
     end.
 
-fetch_remote_file(RemoteFile, TmpDir) ->
-    LocalFile = ds_api_component:file_path(RemoteFile, TmpDir),
+fetch_remote_files([], _VersionDir) ->
+    ok;
+fetch_remote_files([File | Files], VersionDir) ->
+    case is_remote_file(File) of
+        true ->
+            case fetch_remote_file(File, VersionDir) of
+                ok    -> fetch_remote_files(Files, VersionDir);
+                Error -> Error
+            end;
+        false ->
+            fetch_remote_files(Files, VersionDir)
+    end.
+
+fetch_remote_file(RemoteFile, VersionDir) ->
+    LocalFile = local_file_name(RemoteFile, VersionDir),
     LocalFileStr = unicode:characters_to_list(LocalFile),
     case filelib:ensure_dir(LocalFileStr) of
         ok ->
@@ -162,12 +179,11 @@ fetch_remote_file(RemoteFile, TmpDir) ->
             Error
     end.
 
-check_diversity_json(_Component, _Version, _Diversity) ->
-    ok.
+is_remote_file(<<"http://", _/binary>>)  -> true;
+is_remote_file(<<"https://", _/binary>>) -> true;
+is_remote_file(_Local)                   -> false.
 
-write_compact_diversity_json(Path, Diversity) ->
-    try jiffy:encode(Diversity) of
-        Data -> file:write_file(Path, Data)
-    catch
-        error:Error -> {error, Error}
-    end.
+local_file_path(<<"http://", URL/binary>>)  -> filename:join(http, URL);
+local_file_path(<<"https://", URL/binary>>) -> filename:join(https, URL).
+
+check_diversity_json(_Component, _Version, _Diversity) -> ok.

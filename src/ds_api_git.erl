@@ -27,19 +27,14 @@ tags(GitDir) ->
 
 copy_tag(GitDir, Tag, OutputDir) ->
     TempFile0 = filename:join(OutputDir, <<"tag.zip">>),
-    case filelib:ensure_dir(TempFile0) of
-        ok ->
-            Command = <<"git archive --format zip -0 -o ", TempFile0/binary, " ", Tag/binary>>,
-            case ds_api_util:cmd(Command, GitDir) of
-                {ok, _Reply} ->
-                    %% zip does not like binary file names...
-                    TempFile1 = unicode:characters_to_list(TempFile0),
-                    case zip:extract(TempFile1, [{cwd, OutputDir}]) of
-                        {ok, _Files} -> file:delete(TempFile0);
-                        Error        -> Error
-                    end;
-                Error ->
-                    Error
+    Command = <<"git archive --format zip -0 -o ", TempFile0/binary, " ", Tag/binary>>,
+    case ds_api_util:cmd(Command, GitDir) of
+        {ok, _Reply} ->
+            %% zip does not like binary file names...
+            TempFile1 = unicode:characters_to_list(TempFile0),
+            case zip:extract(TempFile1, [{cwd, OutputDir}]) of
+                {ok, _Files} -> file:delete(TempFile0);
+                Error        -> Error
             end;
         Error ->
             Error

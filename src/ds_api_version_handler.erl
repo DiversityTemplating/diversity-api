@@ -1,167 +1,174 @@
 -module(ds_api_version_handler).
 
--export([init/3]).
--export([rest_init/2]).
+-export([init/2]).
 -export([allowed_methods/2]).
+-export([malformed_request/2]).
 -export([resource_exists/2]).
+-export([previously_existed/2]).
+-export([moved_temporarily/2]).
 -export([is_authorized/2]).
 -export([is_conflict/2]).
 -export([generate_etag/2]).
+-export([last_modified/2]).
 -export([content_types_provided/2]).
 -export([content_types_accepted/2]).
 -export([delete_resource/2]).
 -export([send_file/2]).
--export([to_json/2]).
--export([to_css/2]).
+-export([errors_to_json/2]).
 -export([handle_add_version/2]).
 
 -include_lib("kernel/include/file.hrl").
 
--type argument() :: {css, binary(), binary(), [binary()]} | binary() | undefined.
-
 -record(state, {
-          component :: binary(),
-          version   :: ds_api_version:version(),
-          argument  :: argument()
+          action      :: modify | file | css,
+          component   :: binary(),
+          version     :: ds_api_version:version() | undefined,
+          version_dir :: binary() | undefined,
+          expanded    :: boolean(),
+          file        :: binary() | undefined,
+          size        :: non_neg_integer() | undefined,
+          modified    :: calendar:datetime(),
+          gzip        :: boolean(),
+          stage       :: binary() | undefined
          }).
 
+init(Req0, []) ->
+    Req1 = ds_api_util:set_access_control_headers(Req0),
+    {cowboy_rest, Req1, init_state(Req1)}.
 
-init(_Type, Req, []) ->
-    {upgrade, protocol, cowboy_rest, Req, no_state}.
+init_state(Req) ->
+    Component = cowboy_req:binding(component, Req),
+    Version0 = cowboy_req:binding(version, Req),
+    Stage = cowboy_req:binding(stage, Req),
+    {Version1, Expanded} = ds_api_version:expand(Component, Version0),
+    VersionDir = case is_binary(Stage) of
+                     true  -> ds_api_stage:init_version_dir(Component, Stage);
+                     false -> ds_api_component:version_dir(Component, Version1)
+                 end,
+    State = #state{
+               component   = Component,
+               version     = Version1,
+               version_dir = VersionDir,
+               expanded    = Expanded,
+               gzip        = ds_api_util:should_gzip(Req),
+               stage       = Stage
+              },
+    init_state(State, Req).
 
-rest_init(Req0, no_state) ->
-    {Component, Req1} = cowboy_req:binding(component, Req0),
-    {Version, Req2} = cowboy_req:binding(version, Req1),
-    {Argument, Req3} = get_argument(Component, Version, Req2),
-    {ok, Req3, #state{component = Component, version = Version, argument = Argument}}.
-
-get_argument(Component, Version, Req0) ->
-    {PathInfo, Req1} = cowboy_req:path_info(Req0),
-    case PathInfo of
+init_state(#state{version_dir = VersionDir, gzip = GZip} = State, Req) ->
+    case cowboy_req:path_info(Req)of
+        %% Add or delete the version
         [] ->
-            {undefined, Req1};
-        [<<"css">>] ->
-            {Variables0, Req2} = cowboy_req:qs_vals(Req1),
-            Variables1 = ds_api_css:variables_to_binary(Variables0),
-            Hash = ds_api_util:hash(Variables1),
-            CSSFiles = ds_api_css:style_files(Component, Version),
-            {{css, Hash, Variables1, CSSFiles}, Req2};
-        Segments ->
-            VersionDir = ds_api_component:version_dir(Component, Version),
-            {filename:join(VersionDir, segments_to_path(Segments)), Req1}
+            State#state{action = modify};
+        PathInfo ->
+            File0 = case PathInfo of
+                        %% Retrive compiled and concatenated CSS, if the resource hasn't been
+                        %% compiled beforehand then compile it here and return the resulting file
+                        [<<"css">>] ->
+                            Variables = cowboy_req:parse_qs(Req),
+                            case ds_api_css:compile_and_concatenate(VersionDir, Variables) of
+                                {ok, CSSFile} -> CSSFile;
+                                _Error        -> undefined
+                            end;
+                        %% Otherwise a file has been asked for
+                        Segments ->
+                            Path = segments_to_path(Segments),
+                            filename:join(VersionDir, Path)
+                    end,
+            File1 = ds_api_util:maybe_gzipped(File0, GZip),
+            {Size, Modified} = ds_api_util:get_file_info(File1),
+            State#state{action = file, file = File0, size = Size, modified = Modified}
     end.
 
-allowed_methods(Req, #state{argument = undefined} = State) ->
+%% It's only possible to add/delete versions in production, not in stage mode
+allowed_methods(Req, #state{action = modify, stage = undefined} = State) ->
     {[<<"PUT">>, <<"DELETE">>, <<"OPTIONS">>], Req, State};
 allowed_methods(Req, State) ->
     {[<<"GET">>, <<"HEAD">>, <<"OPTIONS">>], Req, State}.
 
-resource_exists(Req, #state{component = Component, version = Version, argument = Argument} = State) ->
-    Exists = case Argument of
-                 undefined ->
-                     filelib:is_dir(ds_api_component:version_dir(Component, Version));
-                 {css, _, _, CSSFiles} ->
-                     CSSFiles =/= undefined andalso CSSFiles =/= [];
-                 File when is_binary(File) ->
-                     filelib:is_regular(File)
-             end,
-    {Exists, Req, State}.
-
-is_authorized(Req0, State) ->
-    case cowboy_req:method(Req0) of
-        {Method, Req1} when Method =:= <<"PUT">>;
-                            Method =:= <<"DELETE">> ->
-            % TODO: API-KEY
-            {true, Req1, State};
-        _ ->
-            {true, Req0, State}
-    end.
-
-is_conflict(Req, #state{component = Component, version = Version} = State) ->
-    {filelib:is_dir(ds_api_component:version_dir(Component, Version)), Req, State}.
-
-generate_etag(Req, #state{component = Component, version = Version0, argument = {css, Hash, _, _}} = State) ->
-    Version1 = ds_api_version:to_binary(Version0),
-    ETag = <<"components/", Component/binary, "/versions/", Version1/binary, "/css/", Hash/binary>>,
-    {{strong, ETag}, Req, State};
-generate_etag(Req, #state{component = Component, version = Version0, argument = File} = State) when is_binary(File) ->
-    Version1 = ds_api_version:to_binary(Version0),
-    ETag = <<"components/", Component/binary, "/versions/", Version1/binary, File/binary>>,
-    {{strong, ETag}, Req, State};
-generate_etag(Req, State) ->
+%% It's only allowed to add/delete if we have a version
+malformed_request(Req, #state{action = modify, version = Version} = State) ->
+    {Version =:= undefined, Req, State};
+malformed_request(Req, State) ->
     {false, Req, State}.
 
-content_types_provided(Req, #state{argument = undefined} = State) ->
-    {[{{<<"application">>, <<"json">>, []}, to_json}], Req, State};
-content_types_provided(Req, #state{argument = {css, _, _, _}} = State) ->
-    {[{{<<"text">>, <<"css">>, []}, to_css}], Req, State};
-content_types_provided(Req, #state{argument = File} = State) when is_binary(File) ->
+resource_exists(Req, #state{action = modify, version_dir = VersionDir} = State) ->
+    {filelib:is_dir(VersionDir), Req, State};
+resource_exists(Req, #state{size = undefined} = State) ->
+    {false, Req, State};
+resource_exists(Req, State) ->
+    {true, Req, State}.
+
+previously_existed(Req, #state{stage = undefined} = State) ->
+    {false, Req, State};
+previously_existed(Req, State) ->
+    {true, Req, State}.
+
+moved_temporarily(Req, #state{version_dir = undefined, stage = Stage} = State) 
+  when is_binary(Stage) ->
+    FallbackAPI = ds_api:fallback_api(),
+    HostURL = cowboy_req:host_url(Req),
+    HostURLSize = byte_size(HostURL),
+    <<_:HostURLSize/binary, RestURL/binary>> = cowboy_req:url(Req),
+    {{true, <<FallbackAPI/binary, RestURL/binary>>}, Req, State};
+moved_temporarily(Req, State) ->
+    {false, Req, State}.
+
+is_authorized(Req, #state{action = modify} = State) ->
+    {ds_api_auth:is_authorized(Req), Req, State};
+is_authorized(Req, State) ->
+    {true, Req, State}.
+
+is_conflict(Req, #state{version_dir = VersionDir} = State) ->
+    {filelib:is_dir(VersionDir), Req, State}.
+
+generate_etag(Req, #state{file = File, expanded = false} = State) ->
+    RootDir = ds_api:root_dir(),
+    RootDirSize = byte_size(RootDir),
+    Path = binary_part(File, RootDirSize, byte_size(File) - RootDirSize),
+    {{strong, Path}, Req, State};
+generate_etag(Req, State) ->
+    {undefined, Req, State}.
+
+last_modified(Req, #state{modified = Modified} = State) ->
+    {Modified, Req, State}.
+
+content_types_provided(Req, #state{action = modify} = State) ->
+    {[{{<<"application">>, <<"json">>, []}, errors_to_json}], Req, State};
+content_types_provided(Req, #state{file = File} = State) when is_binary(File) ->
     {[{cow_mimetypes:all(File), send_file}], Req, State}.
 
 content_types_accepted(Req, State) ->
     {[{{<<"application">>, <<"x-www-form-urlencoded">>, []}, handle_add_version}], Req, State}.
 
-to_json(Req, State) ->
+%% TODO: Return errors from add/delete here
+errors_to_json(Req, State) ->
     {jiffy:encode(#{}), Req, State}.
 
-send_file(Req0, #state{argument = File0} = State) ->
-    {ok, AcceptEncoding, Req1} = cowboy_req:parse_header(<<"accept-encoding">>, Req0, []),
-    {File1, Req2} = case proplists:is_defined(<<"gzip">>, AcceptEncoding) of
-                        true ->
-                            Req = cowboy_req:set_resp_header(<<"content-encoding">>, <<"gzip">>, Req1),
-                            {<<File0/binary, ".gz">>, Req};
-                        false ->
-                            {File0, Req1}
-                    end,
-    {ok, #file_info{size = Size}} = file:read_file_info(File1),
-    SendFile = fun (Socket, Transport) -> Transport:sendfile(Socket, File1) end,
-    {{stream, Size, SendFile}, Req2, State}.
+send_file(Req0, #state{file = File0, size = Size, gzip = GZip, version_dir = VersionDir, stage = Stage} = State) ->
+    {File1, Req1} = maybe_compressed_file(File0, GZip, Req0),
+    SendFile = fun (Socket, Transport) ->
+                       Transport:sendfile(Socket, File1),
+                       case is_binary(Stage) of
+                           true  -> ds_api_util:delete_dir(VersionDir);
+                           false -> ok
+                       end
+               end,
+    {{stream, Size, SendFile}, Req1, State}.
 
-to_css(Req0, #state{
-                component = Component,
-                version   = Version,
-                argument  = {css, Hash, Variables, CSSFiles0}
-               } = State) ->
-    case ds_api_css:compile_component_sass(Component, Version, Hash, Variables, CSSFiles0) of
-        {ok, CSSFiles1} ->
-            send_css_files(CSSFiles1, Req0, State);
-        {error, Error} ->
-            {false, cowboy_req:set_resp_body(Error, Req0), State}
+maybe_compressed_file(File0, GZip, Req) ->
+    case ds_api_util:maybe_gzipped(File0, GZip) of
+        File0 -> {File0, Req};
+        File1 -> {File1, cowboy_req:set_resp_header(<<"content-encoding">>, <<"gzip">>, Req)}
     end.
 
-send_css_files(CSSFiles0, Req0, State) ->
-    {ok, AcceptEncoding, Req1} = cowboy_req:parse_header(<<"accept-encoding">>, Req0, []),
-    {CSSFiles1, Req2} = case proplists:is_defined(<<"gzip">>, AcceptEncoding) of
-                            true ->
-                                Req = cowboy_req:set_resp_header(<<"content-encoding">>, <<"gzip">>, Req1),
-                                GzippedCSSFiles = [<<File/binary, ".gz">> || File <- CSSFiles0],
-                                {GzippedCSSFiles, Req};
-                            false ->
-                                {CSSFiles0, Req1}
-                        end,
-    TotalSize = lists:foldl(
-                  fun (File, SizeAcc) ->
-                          {ok, #file_info{size = Size}} = file:read_file_info(File),
-                          Size + SizeAcc
-                  end,
-                  0,
-                  CSSFiles1
-                 ),
-    SendFiles = fun (Socket, Transport) ->
-                        lists:foreach(
-                          fun (File) -> Transport:sendfile(Socket, File) end,
-                          CSSFiles1
-                         )
-                end,
-    {{stream, TotalSize, SendFiles}, Req2, State}.
-
-handle_add_version(Req0, #state{component = Component, version = Version} = State) ->
+%% TODO: Return errors
+handle_add_version(Req, #state{component = Component, version = Version} = State) ->
     case ds_api_component:add_version(Component, Version) of
         ok ->
-            {true, Req0, State};
-        {error, Error} ->
-            Req1 = cowboy_req:set_resp_body(Error, Req0),
-            {false, Req1, State}
+            {true, Req, State};
+        {error, _Error} ->
+            {false, Req, State}
     end.
 
 delete_resource(Req, #state{component = Component, version = Version} = State) ->

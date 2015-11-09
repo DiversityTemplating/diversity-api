@@ -1,4 +1,4 @@
--module(divapi_cache).
+-module(ds_api_cache).
 
 -behaviour(gen_server).
 
@@ -68,7 +68,7 @@ handle_cast({put, Key, Value, Timeout}, State) ->
     {noreply, State}.
 
 handle_info({clear, Key}, State) ->
-    ets:delete(Key),
+    ets:delete(?CACHE, Key),
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.

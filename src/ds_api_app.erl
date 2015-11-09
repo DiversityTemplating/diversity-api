@@ -9,28 +9,31 @@
 
 start(_Type, _Args) ->
     %% Expand components directory to an absolute path and create it
-    ComponentsDir0 = ds_api:components_dir(),
-    ComponentsDir1 = filename:absname(ComponentsDir0),
-    ok = ds_api:set_config(components_dir, ComponentsDir1),
-    ok = filelib:ensure_dir(ComponentsDir1),
+    RootDir0 = ds_api:root_dir(),
+    RootDir1 = filename:absname(RootDir0),
+    ds_api:root_dir(RootDir1),
+
+    filelib:ensure_dir(ds_api:root_dir()),
+    file:make_dir(ds_api:root_dir()),
+    file:make_dir(ds_api:components_dir()),
+    file:make_dir(ds_api:tmp_dir()),
 
     %% Setup cowboy routes
-    ComponentConstraintFun = fun (<<>>)      -> false;
-                                 (Component) -> {true, Component}
-                             end,
-    Constraints0 = [{component, function, ComponentConstraintFun}],
+    Constraints0 = [{component, nonempty}],
     VersionConstraintFun = fun (Value) ->
                                    case ds_api_version:to_version(Value) of
                                        {ok, Version}   -> {true, Version};
                                        {error, badarg} -> false
                                    end
                            end,
-    Constraints1 = [{version, function, VersionConstraintFun} | Constraints0],
+    Constraints1 = [{version, VersionConstraintFun} | Constraints0],
 
     Routes = [
         {"/components",                                         ds_api_components_handler, []},
         {"/components/:component",                Constraints0, ds_api_component_handler, []},
-        {"/components/:component/:version/[...]", Constraints1, ds_api_version_handler, []}
+        {"/components/:component/:version/[...]", Constraints1, ds_api_version_handler, []},
+        {"/js",                                                 ds_api_concat_handler, [js]},
+        {"/css",                                                ds_api_concat_handler, [css]}
     ],
     HostMatch = ds_api:config(host_match, '_'),
     Dispatch = cowboy_router:compile([{HostMatch, Routes}]),
