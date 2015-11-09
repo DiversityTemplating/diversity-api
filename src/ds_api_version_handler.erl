@@ -164,16 +164,28 @@ maybe_compressed_file(File0, GZip, Req) ->
 
 %% TODO: Return errors
 handle_add_version(Req, #state{component = Component, version = Version} = State) ->
-    case ds_api_component:add_version(Component, Version) of
-        ok ->
-            {true, Req, State};
-        {error, _Error} ->
-            {false, Req, State}
-    end.
+    Added = case do_add_version(Component, Version) of
+                {ok, Result}    -> lists:all(fun (R) -> R =:= ok end, Result);
+                {error, _Error} -> false
+            end,
+    case Added of
+        true  -> ok;
+        false -> do_delete_version(Component, Version)
+    end,
+    {Added, Req, State}.
 
 delete_resource(Req, #state{component = Component, version = Version} = State) ->
-    ok = ds_api_component:delete_version(Component, Version),
-    {true, Req, State}.
+    Deleted = case do_delete_version(Component, Version) of
+                  {ok, _Result} -> true;
+                  _Error        -> false
+              end,
+    {Deleted, Req, State}.
+
+do_add_version(Component, Version) ->
+    ds_api_util:multicall(ds_api_component, add_version, [Component, Version]).
+
+do_delete_version(Component, Version) ->
+    ds_api_util:multicall(ds_api_component, delete_version, [Component, Version]).
 
 segments_to_path([]) ->
     <<>>;

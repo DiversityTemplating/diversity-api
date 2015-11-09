@@ -12,6 +12,8 @@
 
 -export([fallback_api/0]).
 
+-export([nodes/0]).
+
 -export([config/1]).
 -export([config/2]).
 -export([set_config/2]).
@@ -42,6 +44,9 @@ tmp_dir() ->
 
 fallback_api() ->
     config(fallback_api).
+
+nodes() ->
+    config(nodes, [node()]).
 
 config(Key) ->
     config(Key, undefined).

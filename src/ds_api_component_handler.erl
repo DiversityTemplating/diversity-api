@@ -41,8 +41,10 @@ content_types_accepted(Req, Component) ->
     {[{{<<"application">>, <<"x-www-form-urlencoded">>, []}, handle_add_component}], Req, Component}.
 
 delete_resource(Req, Component) ->
-    ok = ds_api_component:delete_component(Component),
-    {true, Req, Component}.
+    case do_delete_component(Component) of
+        {ok, _Result} -> {true, Req, Component};
+        _Error        -> {false, Req, Component}
+    end.
 
 to_json(Req, Component) ->
     Versions = [ds_api_version:to_binary(Version) || Version <- ds_api_component:versions(Component)],
@@ -52,15 +54,26 @@ handle_add_component(Req0, Component) ->
     {ok, Query, Req1} = cowboy_req:body_qs(Req0),
     case proplists:get_value(<<"repo_url">>, Query) of
         RepoURL when is_binary(RepoURL) ->
-            case ds_api_component:add_component(Component, RepoURL) of
-                ok ->
-                    {true, Req1, Component};
-                {error, _Error} ->
-                    {false, Req1, Component}
-            end;
+            Added = case do_add_component(Component, RepoURL) of
+                        {ok, Result} ->
+                            lists:all(fun (R) -> R=:= ok end, Result);
+                        _Error ->
+                            false
+                    end,
+            case Added of
+                true  -> ok;
+                false -> do_delete_component(Component)
+            end,
+            {Added, Req1, Component};
         undefined ->
             {false, Req1, Component}
     end.
+
+do_add_component(Component, RepoURL) ->
+    ds_api_util:multicall(ds_api_component, add_component, [Component, RepoURL]).
+
+do_delete_component(Component) ->
+    ds_api_util:multicall(ds_api_component, delete_component, [Component]).
 
 component_exists(Component) ->
     filelib:is_dir(ds_api_component:component_dir(Component)).

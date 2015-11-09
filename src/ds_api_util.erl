@@ -14,6 +14,7 @@
 -export([read_json_file/1]).
 -export([write_json_file/2]).
 -export([set_access_control_headers/1]).
+-export([multicall/3]).
 
 -include_lib("kernel/include/file.hrl").
 
@@ -171,3 +172,9 @@ write_json_file(Path, Diversity) ->
 
 set_access_control_headers(Req) ->
     cowboy_req:set_resp_header(<<"access-control-allow-origin">>, <<"*">>, Req).
+
+multicall(Module, Function, Args) ->
+    case rpc:multicall(ds_api:nodes(), Module, Function, Args, 30000) of
+        {Results, []}          -> {ok, Results};
+        {_Results, ErrorNodes} -> {error, {failed_on, ErrorNodes}}
+    end.

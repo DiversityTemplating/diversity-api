@@ -52,7 +52,7 @@ start(_Type, _Args) ->
     ),
 
     %% Connect to all nodes.
-    ListOfNodes = ds_api:config(nodes, []),
+    ListOfNodes = ds_api:nodes(),
     [net_kernel:connect_node(Node) || Node <- ListOfNodes],
     ds_api_sup:start_link().
 
