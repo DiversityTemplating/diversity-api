@@ -18,18 +18,12 @@
 
 -include_lib("kernel/include/file.hrl").
 
-cmd(Command, WorkingDir) ->
-    PortOpts = [exit_status, {cd, WorkingDir}, binary, stderr_to_stdout],
-    Port = erlang:open_port({spawn, Command}, PortOpts),
+%% @doc Run a given command as a port
+-spec cmd(binary(), list(term())) -> {ok, binary()} | {error, binary()}.
+cmd(Command, Opts) ->
+    PortOpts = Opts ++ [stream, exit_status, binary, use_stdio, stderr_to_stdout],
+    Port = erlang:open_port({spawn_executable, Command}, PortOpts),
     wait_for_reply(Port).
-
-tmp_path() ->
-    TmpName = integer_to_binary(erlang:phash2(make_ref())),
-    TmpPath = filename:join(ds_api:tmp_dir(), TmpName),
-    case filelib:is_file(TmpPath) of
-        true  -> tmp_path();
-        false -> TmpPath
-    end.
 
 %% TODO: More correct timeout (now it's a timeout from last received chunk)
 wait_for_reply(Port) ->
@@ -49,6 +43,18 @@ wait_for_reply(Port, Acc, Timeout) ->
             {error, Acc}
     end.
 
+%% @doc Retrive a temporary path
+-spec tmp_path() -> binary().
+tmp_path() ->
+    TmpName = integer_to_binary(erlang:phash2(make_ref())),
+    TmpPath = filename:join(ds_api:tmp_dir(), TmpName),
+    case filelib:is_file(TmpPath) of
+        true  -> tmp_path();
+        false -> TmpPath
+    end.
+
+%% @doc Recursively delete a directory
+-spec delete_dir(binary()) -> ok.
 delete_dir(undefined) ->
     ok;
 delete_dir(Directory) ->
@@ -82,6 +88,8 @@ delete_all_files([Directory | Rest0], EmptyDirectories) ->
             delete_all_files(Rest0, EmptyDirectories)
     end.
 
+%% @doc Given an extension return the files minified name
+-spec minified_name(binary(), binary()) -> binary().
 minified_name(File0, Extension) ->
     case filename:extension(File0) of
         Extension ->
@@ -94,6 +102,8 @@ minified_name(File0, Extension) ->
             File0
     end.
 
+%% @doc GZip a given file and adjust the modified time to be that of the original file
+-spec gzip(binary()) -> ok | {error, term()}.
 gzip(Input) ->
     case file:read_file(Input) of
         {ok, Data} ->
@@ -107,30 +117,54 @@ gzip(Input) ->
             Error
     end.
 
+%% @doc Hash and return the hash as a hexbin
+-spec hash(binary()) -> binary().
 hash(Data) ->
     Hash = crypto:hash(sha256, Data),
     << <<Y>> || <<X:4>> <= Hash, Y <- integer_to_list(X,16)>>.
 
+%% @doc Concatenate the given files into the given output file.
+%% The concatenated file will have a modified time of the last modified files which were %% concatenated.
+-spec concatenate_files(binary(), binary()) -> ok | {error, term()}.
 concatenate_files(Files, Output) ->
     concatenate_files(Files, <<>>, Output).
 
+%% @doc Concatenate the given files into the given output file with delimiter inserted after each file.
+%% The concatenated file will have a modified time of the last modified files which were %% concatenated.
+-spec concatenate_files(binary(), binary(), binary()) -> ok | {error, term()}.
 concatenate_files([], _Delimiter, _Output) ->
     ok;
 concatenate_files(Files, Delimiter, Output) ->
     case file:open(Output, [append]) of
-        {ok, OutputFile} -> concatenate_files_(Files, Delimiter, OutputFile);
-        Error            -> Error
+        {ok, OutputFile} ->
+            Modified0 = {{0, 0, 0}, {0, 0, 0}},
+            case concatenate_files_(Files, Modified0, Delimiter, OutputFile) of
+                {ok, LastModified} ->
+                    file:change_time(Output, LastModified);
+                Error ->
+                    file:delete(Output),
+                    Error
+            end;
+        Error ->
+            file:delete(Output),
+            Error
     end.
 
-concatenate_files_([], _Delimiter, OutputFile) ->
-    file:close(OutputFile);
-concatenate_files_([File | Files], Delimiter, OutputFile) ->
+concatenate_files_([], Modified, _Delimiter, OutputFile) ->
+    file:close(OutputFile),
+    {ok, Modified};
+concatenate_files_([File | Files], Modified0, Delimiter, OutputFile) ->
     case file:read_file(File) of
         {ok, Data} ->
+            {_Size, Modified} = get_file_info(File),
+            Modified1 = case Modified > Modified0 of
+                            true  -> Modified;
+                            false -> Modified0
+                        end,
             case file:write(OutputFile, Data) of
                 ok ->
                     ok = file:write(OutputFile, Delimiter),
-                    concatenate_files_(Files, Delimiter, OutputFile);
+                    concatenate_files_(Files, Modified1, Delimiter, OutputFile);
                 _Error ->
                     {error, <<"Could not concatenate file ", File/binary>>}
             end;
@@ -138,43 +172,57 @@ concatenate_files_([File | Files], Delimiter, OutputFile) ->
             Error
     end.
 
+%% @doc Retrive the size and modification time for given file
+-spec get_file_info(binary() | undefined) -> {non_neg_integer() | undefined, calendar:datetime() | undefined}.
 get_file_info(undefined) ->
     {undefined, undefined};
 get_file_info(File) ->
-    case file:read_file_info(File) of
+    case file:read_file_info(File, [{time, universal}]) of
         {ok, #file_info{size = Size, mtime = Modified}} -> {Size, Modified};
         _Error                                          -> {undefined, undefined}
     end.
 
+%% @doc Given a request check if we should gzip the response
+-spec should_gzip(cowboy_req:req()) -> boolean().
 should_gzip(Req) ->
     AcceptEncoding = cowboy_req:parse_header(<<"accept-encoding">>, Req, []),
     proplists:is_defined(<<"gzip">>, AcceptEncoding).
 
+%% @doc Return the gzipped filename if we should gzip it
+-spec maybe_gzipped(binary() | undefined, boolean()) -> binary() | undefined.
 maybe_gzipped(undefined, _GZip) -> undefined;
 maybe_gzipped(File, true)       -> <<File/binary, ".gz">>;
 maybe_gzipped(File, false)      -> File.
 
-read_json_file(DiversityPath) ->
+%% @doc Read a JSON file and decode it
+-spec read_json_file(binary()) -> {ok, jiffy:json_value()} | {error, term()}.
+read_json_file(JSONFile) ->
     try
-        {ok, Diversity0} = file:read_file(DiversityPath),
-        {ok, jiffy:decode(Diversity0, [return_maps])}
-    catch
-        error:Error ->
-            {error, Error}
-    end.
-
-write_json_file(Path, Diversity) ->
-    try jiffy:encode(Diversity) of
-        Data -> file:write_file(Path, Data)
+        {ok, JSON} = file:read_file(JSONFile),
+        {ok, jiffy:decode(JSON, [return_maps])}
     catch
         error:Error -> {error, Error}
     end.
 
+%% @doc Write JSON to file
+-spec write_json_file(binary(), jiffy:json_value()) -> ok | {error, term()}.
+write_json_file(JSONFile, JSON) ->
+    try jiffy:encode(JSON) of
+        Binary -> file:write_file(JSONFile, Binary)
+    catch
+        error:Error -> {error, Error}
+    end.
+
+%% @doc Set access control header for a request
+-spec set_access_control_headers(cowboy_req:req()) -> cowboy_req:req().
 set_access_control_headers(Req) ->
     cowboy_req:set_resp_header(<<"access-control-allow-origin">>, <<"*">>, Req).
 
+%% @doc Run a function on all API nodes
+-spec multicall(atom(), atom(), list(term())) ->
+    {ok, list(term())} | {error, {not_online, list(atom())}}.
 multicall(Module, Function, Args) ->
     case rpc:multicall(ds_api:nodes(), Module, Function, Args, 30000) of
         {Results, []}          -> {ok, Results};
-        {_Results, ErrorNodes} -> {error, {failed_on, ErrorNodes}}
+        {_Results, ErrorNodes} -> {error, {not_online, ErrorNodes}}
     end.

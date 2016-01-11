@@ -13,6 +13,7 @@ start(_Type, _Args) ->
     RootDir1 = filename:absname(RootDir0),
     ds_api:root_dir(RootDir1),
 
+    %% Create directory structure
     filelib:ensure_dir(ds_api:root_dir()),
     file:make_dir(ds_api:root_dir()),
     file:make_dir(ds_api:components_dir()),
