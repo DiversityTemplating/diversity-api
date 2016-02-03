@@ -6,3 +6,5 @@ logs/
 deps/
 relx
 .erlang.mk*
+priv/sassc
+ds_api.d

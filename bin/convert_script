@@ -1,0 +1,50 @@
+#!/bin/sh
+
+COMPONENTS_DIR="$1"
+DS_API="$2"
+
+for COMPONENT in $(ls "$COMPONENTS_DIR" | sed 's/\.git$//')
+do
+    ## Retrive the repository URL for the component
+    cd $COMPONENTS_DIR/$COMPONENT.git
+    REPO_URL=$(git remote show origin 2> /dev/null | grep 'Fetch URL' | cut -d: -f2- | tr -d '[:space:]')
+
+    if [ "$REPO_URL" != "" ]
+    then
+        COMPONENT_URL="$DS_API/components/$COMPONENT"
+        ## If we got a repository URL then try to add the component to ds-api
+        curl -X PUT -d "repo_url=$REPO_URL" "$COMPONENT_URL"
+        if [ $? -eq 0 ]
+        then
+            ## If the component was added we get all the tags and try to add them
+            ## as versions for the component
+            echo "$COMPONENT: Added component"
+
+            ## Add each of the latest minor versions
+            ## Retrive the versions(tags) in descending order and take the first of each minor version
+            VERSIONS=$(git tag --sort=-v:refname)
+            PREV_MINOR=""
+            for VERSION in $VERSIONS 
+            do
+                MINOR=$(echo $VERSION | cut -d. -f1-2)
+                if [ "$PREV_MINOR" != "$MINOR" ]
+                then
+                    PREV_MINOR=$MINOR
+                    echo "$COMPONENT: Adding latest minor($MINOR) version $VERSION"
+                    curl -X PUT -d '' "$COMPONENT_URL/$VERSION"
+                    if [ $? -eq 0 ]
+                    then
+                        echo "$COMPONENT: Added version $VERSION"
+                    else
+                        echo "$COMPONENT: Failed to add version $VERSION"
+                    fi
+                fi
+            done
+        else
+            echo "$COMPONENT: Could not add component"
+        fi
+    else
+        ## Otherwise just skip the component
+        echo "$COMPONENT: Could not get repo_url"
+    fi
+done
