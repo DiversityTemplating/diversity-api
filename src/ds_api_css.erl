@@ -11,9 +11,9 @@ minify(CSSFile) ->
 
 minify(Input, Output) ->
     SassC = sassc_path(),
-    Command = <<SassC/binary, " -t compressed ", Input/binary, " ", Output/binary>>,
+    Args = [<<"-t">>, <<"compressed">>, Input, Output],
     WorkingDir = filename:dirname(Input),
-    case ds_api_util:cmd(Command, WorkingDir) of
+    case ds_api_util:cmd(SassC, [{cd, WorkingDir}, {args, Args}]) of
         {ok, _Reply} -> {ok, Output};
         Error        -> Error
     end.
@@ -23,10 +23,9 @@ compile(LoadPath, Input, OutputFile) ->
     SassC = sassc_path(),
     WorkingDir = filename:dirname(OutputFile),
     InputFile = <<OutputFile/binary, ".input">>,
-    Command = <<SassC/binary, " -t compressed -I ", LoadPath/binary,
-                " ", InputFile/binary, " ", OutputFile/binary>>,
+    Args = [<<"-t">>, <<"compressed">>, <<"-I">>, LoadPath, InputFile, OutputFile],
     ok = file:write_file(InputFile, Input),
-    case ds_api_util:cmd(Command, WorkingDir) of
+    case ds_api_util:cmd(SassC, [{cd, WorkingDir}, {args, Args}]) of
         {ok, _Output} -> ok;
         Error         -> Error
     end.

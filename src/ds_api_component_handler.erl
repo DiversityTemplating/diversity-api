@@ -41,13 +41,19 @@ content_types_accepted(Req, Component) ->
     {[{{<<"application">>, <<"x-www-form-urlencoded">>, []}, handle_add_component}], Req, Component}.
 
 delete_resource(Req, Component) ->
+    lager:debug("Deleting component ~s", [Component]),
     case do_delete_component(Component) of
-        {ok, _Result} -> {true, Req, Component};
-        _Error        -> {false, Req, Component}
+        {ok, Result} ->
+            lager:info("Component ~s deleted with result ~p", [Component, Result]),
+            {true, Req, Component};
+        {error, Error} ->
+            lager:error("Could not delete component ~s because ~p", [Component, Error]),
+            {false, Req, Component}
     end.
 
 to_json(Req, Component) ->
     Versions = [ds_api_version:to_binary(Version) || Version <- ds_api_component:versions(Component)],
+    lager:debug("Versions for component ~s is ~p", [Component, Versions]),
     {jiffy:encode(Versions), Req, Component}.
 
 handle_add_component(Req0, Component) ->
@@ -56,16 +62,15 @@ handle_add_component(Req0, Component) ->
         RepoURL when is_binary(RepoURL) ->
             Added = case do_add_component(Component, RepoURL) of
                         {ok, Result} ->
-                            lists:all(fun (R) -> R=:= ok end, Result);
-                        _Error ->
+                            lager:info("Component ~s added with result ~p", [Component, Result]),
+                            true;
+                        {error, Error} ->
+                            lager:error("Could not add component ~s because ~p", [Component, Error]),
                             false
                     end,
-            case Added of
-                true  -> ok;
-                false -> do_delete_component(Component)
-            end,
             {Added, Req1, Component};
         undefined ->
+            lager:error("Could not add component ~s because no repo_url was specified", [Component]),
             {false, Req1, Component}
     end.
 

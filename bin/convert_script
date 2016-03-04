@@ -26,18 +26,24 @@ do
             PREV_MINOR=""
             for VERSION in $VERSIONS 
             do
-                MINOR=$(echo $VERSION | cut -d. -f1-2)
-                if [ "$PREV_MINOR" != "$MINOR" ]
+                IS_VERSION=$(echo $VERSION | sed -e 's/^[0-9]\{1,\}\.[0-9]\{1,\}\.[0-9]\{1,\}$//')
+                if [ "$IS_VERSION" = "" ]
                 then
-                    PREV_MINOR=$MINOR
-                    echo "$COMPONENT: Adding latest minor($MINOR) version $VERSION"
-                    curl -X PUT -d '' "$COMPONENT_URL/$VERSION"
-                    if [ $? -eq 0 ]
+                    MINOR=$(echo $VERSION | cut -d. -f1-2)
+                    if [ "$PREV_MINOR" != "$MINOR" ]
                     then
-                        echo "$COMPONENT: Added version $VERSION"
-                    else
-                        echo "$COMPONENT: Failed to add version $VERSION"
+                        PREV_MINOR=$MINOR
+                        echo "$COMPONENT: Adding latest minor($MINOR) version $VERSION"
+                        curl -X PUT -d '' "$COMPONENT_URL/$VERSION"
+                        if [ $? -eq 0 ]
+                        then
+                            echo "$COMPONENT: Added version $VERSION"
+                        else
+                            echo "$COMPONENT: Failed to add version $VERSION"
+                        fi
                     fi
+                else
+                    echo "$COMPONENT: Invalid version tag $VERSION"
                 fi
             done
         else

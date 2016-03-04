@@ -144,7 +144,7 @@ create_version(Component, Version, TmpDir) ->
                 true ->
                     ok = make_version_dir(TmpDir),
                     FilesDir = files_dir(TmpDir),
-                    case ds_api_git:copy_tag(GitDir, Version, FilesDir) of
+                    case ds_api_git:copy_version(GitDir, Version, FilesDir) of
                         ok    -> ds_api_preprocess:run(Component, Version, TmpDir);
                         Error -> Error
                     end;

@@ -42,8 +42,12 @@ init_state(Req) ->
     Stage = cowboy_req:binding(stage, Req),
     {Version1, Expanded} = ds_api_version:expand(Component, Version0),
     VersionDir = case is_binary(Stage) of
-                     true  -> ds_api_stage:init_version_dir(Component, Stage);
-                     false -> ds_api_component:version_dir(Component, Version1)
+                     true  ->
+                         ds_api_stage:init_version_dir(Component, Stage);
+                     false ->
+                         ComponentDir = ds_api_component:component_dir(Component),
+                         VersionsDir = ds_api_component:versions_dir(ComponentDir),
+                         ds_api_component:version_dir(VersionsDir, Version1)
                  end,
     State = #state{
                component   = Component,
@@ -67,8 +71,14 @@ init_state(#state{version_dir = VersionDir, gzip = GZip} = State, Req) ->
                         [<<"css">>] ->
                             Variables = cowboy_req:parse_qs(Req),
                             case ds_api_css:compile_and_concatenate(VersionDir, Variables) of
-                                {ok, CSSFile} -> CSSFile;
-                                _Error        -> undefined
+                                {ok, CSSFile} ->
+                                    CSSFile;
+                                {error, Error} ->
+                                    lager:error(
+                                      "Could not compile SASS and/or concatenate CSS because ~p",
+                                      [Error]
+                                     ),
+                                    undefined
                             end;
                         %% Otherwise a file has been asked for
                         Segments ->
@@ -143,10 +153,11 @@ content_types_accepted(Req, State) ->
 
 %% TODO: Return errors from add/delete here
 errors_to_json(Req, State) ->
-    {jiffy:encode(#{}), Req, State}.
+    {<<>>, Req, State}.
 
 send_file(Req0, #state{file = File0, size = Size, gzip = GZip, version_dir = VersionDir, stage = Stage} = State) ->
     {File1, Req1} = maybe_compressed_file(File0, GZip, Req0),
+    lager:debug("Sending file ~s(~p)", [File1, Size]),
     SendFile = fun (Socket, Transport) ->
                        Transport:sendfile(Socket, File1),
                        case is_binary(Stage) of
@@ -162,22 +173,27 @@ maybe_compressed_file(File0, GZip, Req) ->
         File1 -> {File1, cowboy_req:set_resp_header(<<"content-encoding">>, <<"gzip">>, Req)}
     end.
 
-%% TODO: Return errors
 handle_add_version(Req, #state{component = Component, version = Version} = State) ->
+    lager:info("Adding version ~p for component ~s", [Version, Component]),
     Added = case do_add_version(Component, Version) of
-                {ok, Result}    -> lists:all(fun (R) -> R =:= ok end, Result);
-                {error, _Error} -> false
+                {ok, Result} ->
+                    lager:info("Added version ~p for component ~s with result ~p", [Version, Component, Result]),
+                    true;
+                {error, Error} ->
+                    lager:error("Could not add version ~p for component ~s because ~p", [Version, Component, Error]),
+                    false
             end,
-    case Added of
-        true  -> ok;
-        false -> do_delete_version(Component, Version)
-    end,
     {Added, Req, State}.
 
 delete_resource(Req, #state{component = Component, version = Version} = State) ->
+    lager:info("Deleting version ~p for component ~s", [Version, Component]),
     Deleted = case do_delete_version(Component, Version) of
-                  {ok, _Result} -> true;
-                  _Error        -> false
+                  {ok, Result} ->
+                      lager:info("Deleted version ~p for component ~s with result ~p", [Version, Component, Result]),
+                      true;
+                  {error, Error} ->
+                      lager:error("Could not delete version ~p for component ~s because ~p", [Version, Component, Error]),
+                      false
               end,
     {Deleted, Req, State}.
 

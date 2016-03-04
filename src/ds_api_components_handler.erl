@@ -12,4 +12,10 @@ content_types_provided(Req, State) ->
     {[{{<<"application">>, <<"json">>, []}, to_json}], Req, State}.
 
 to_json(Req, State) ->
-    {jiffy:encode(ds_api_component:components()), Req, State}.
+    Components = ds_api_component:components(),
+    lager:debug(
+      "Listing components...~n"
+      "Components: ~p",
+      [Components]
+     ),
+    {jiffy:encode(Components), Req, State}.
